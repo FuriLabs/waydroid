@@ -66,6 +66,10 @@ class DbusContainerManager(dbus.service.Object):
         except AttributeError:
             return {}
 
+    @dbus.service.method("id.waydro.ContainerManager", in_signature='s', out_signature='')
+    def RemoveApp(self, packageName):
+        remove_app(self.args, packageName)
+
 def service(args, looper):
     dbus_obj = DbusContainerManager(looper, dbus.SystemBus(), '/ContainerManager', args)
     looper.run()
@@ -288,3 +292,8 @@ def open_app_present(args):
     status = helpers.lxc.status(args)
     if status == "RUNNING":
         return helpers.lxc.open_app_present()
+
+def remove_app(args, packageName):
+    status = helpers.lxc.status(args)
+    if status == "RUNNING":
+        helpers.lxc.remove_app(args, packageName)
