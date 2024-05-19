@@ -96,6 +96,38 @@ NoDisplay={str(hide).lower()}
         if unlocked_cb:
             unlocked_cb()
 
+        monitor_apps(platformService)
+
+    def monitor_apps(platformService):
+        old_appsList = platformService.getAppsInfo()
+        old_length = len(old_appsList)
+        while not stopping:
+            appsList = platformService.getAppsInfo()
+            new_length = len(appsList)
+
+            if new_length > old_length:
+                for app in appsList:
+                    makeDesktopFile(app)
+                old_length = new_length
+                old_appsList = appsList
+            elif new_length < old_length:
+                old_pkgname = []
+                new_pkgname = []
+                for item in old_appsList:
+                    old_pkgname.append(item['packageName'])
+                for item in appsList:
+                    new_pkgname.append(item['packageName'])
+
+                missing_pkgname = list(set(old_pkgname) - set(new_pkgname))
+                desktop_file_path = apps_dir + "/waydroid." + missing_pkgname[0] + ".desktop"
+                if os.path.exists(desktop_file_path):
+                    os.remove(desktop_file_path)
+
+                old_length = new_length
+                old_appsList = appsList
+
+            sleep(2)
+
     def packageStateChanged(mode, packageName, uid):
         platformService = IPlatform.get_service(args)
         if platformService:
