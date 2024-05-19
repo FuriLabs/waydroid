@@ -86,6 +86,9 @@ NoDisplay={str(hide).lower()}
             if not os.path.exists(apps_dir):
                 os.mkdir(apps_dir, 0o700)
             appsList = platformService.getAppsInfo()
+            while len(platformService.getAppsInfo()) < 3:
+                sleep(1)
+
             for app in appsList:
                 makeDesktopFile(app)
             multiwin = platformService.getprop("persist.waydroid.multi_windows", "false")
