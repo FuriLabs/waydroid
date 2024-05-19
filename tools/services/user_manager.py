@@ -1,5 +1,6 @@
 # Copyright 2021 Erfan Abdi
 # SPDX-License-Identifier: GPL-3.0-or-later
+from time import sleep
 import logging
 import os
 import threading
@@ -107,9 +108,21 @@ NoDisplay={str(hide).lower()}
                     if makeDesktopFile(appInfo) == -1:
                         os.remove(desktop_file_path)
 
+    def usermonitor_timeout():
+        timer = threading.Timer(20.0, lambda: userUnlocked(0))
+        timer.start()
+
+        try:
+            IUserMonitor.add_service(args, userUnlocked, packageStateChanged)
+        except Exception as e:
+            logging.error(f"Failed to add service: {e}")
+        finally:
+            timer.cancel()
+
     def service_thread():
         while not stopping:
-            IUserMonitor.add_service(args, userUnlocked, packageStateChanged)
+            usermonitor_timeout()
+            sleep(1)
 
     global stopping
     stopping = False
