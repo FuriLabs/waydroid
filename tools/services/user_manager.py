@@ -104,6 +104,10 @@ NoDisplay={str(hide).lower()}
         cm = ipc.DBusContainerService()
         cm.ForceFinishSetup()
 
+        timezone = get_timezone()
+        if timezone:
+            cm.Setprop("persist.sys.timezone", timezone)
+
         monitor_apps(platformService)
 
     def monitor_apps(platformService):
@@ -181,3 +185,16 @@ def stop(args):
             args.userMonitorLoop.quit()
     except AttributeError:
         logging.debug("UserMonitor service is not even started")
+
+def get_timezone():
+    localtime_path = '/etc/localtime'
+
+    try:
+        if os.path.exists(localtime_path):
+            if os.path.islink(localtime_path):
+                target = os.readlink(localtime_path)
+                timezone = '/'.join(target.split('/')[-2:])
+                return timezone
+    except Exception as e:
+        logging.error(f"Failed to get timezone: {e}")
+    return False
