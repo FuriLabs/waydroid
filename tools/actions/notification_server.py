@@ -2,14 +2,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import re
-import sys
 import time
 import logging
 import threading
 import subprocess
 import dbus
 import dbus.service
-from collections import defaultdict
 
 running = False
 loop_thread = None
@@ -32,8 +30,7 @@ class INotification(dbus.service.Object):
     def DeleteMessage(self, msg_hash):
         pass
 
-def get_notifications(old_notification):
-    global running
+def get_notifications(_old_notification):
     notifications = {}
     old_notifications = {}
 
@@ -42,19 +39,20 @@ def get_notifications(old_notification):
     interface = INotification(bus_name, object_path='/id/waydro/Notification')
 
     notification_command = [
-        "lxc-attach", "-P", "/var/lib/waydroid/lxc",
-        "-n", "waydroid", "--clear-env", "--", "/system/bin/sh", "-c", "dumpsys notification --noredact"
+        "lxc-attach", "-P", "/var/lib/waydroid/lxc", "-n", "waydroid", "--clear-env", "--",
+        "/system/bin/sh", "-c", "dumpsys notification --noredact"
     ]
 
     applist_command = [
-        "lxc-attach", "-P", "/var/lib/waydroid/lxc",
-        "-n", "waydroid", "--clear-env", "--", "/system/bin/sh", "-c", "pm list packages -3"
+        "lxc-attach", "-P", "/var/lib/waydroid/lxc", "-n", "waydroid", "--clear-env", "--",
+        "/system/bin/sh", "-c", "pm list packages -3"
     ]
 
     logging.info("Starting notification server service")
 
     while running:
-        notification_process = subprocess.Popen(notification_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        notification_process = subprocess.Popen(notification_command, stdout=subprocess.PIPE,
+                                                stderr=subprocess.PIPE)
         notification_stdout, notification_stderr = notification_process.communicate()
 
         if notification_stderr:
@@ -66,7 +64,8 @@ def get_notifications(old_notification):
 
         notification_stdout = notification_stdout.decode()
 
-        applist_process = subprocess.Popen(applist_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        applist_process = subprocess.Popen(applist_command, stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE)
         applist_stdout, applist_stderr = applist_process.communicate()
 
         if applist_stderr:
@@ -149,27 +148,30 @@ def get_notifications(old_notification):
             # this happens e.g. for foreground applications when they start.
             # currently they are ignored, but they could also be transformed
             # into a "<app> started in background" message
-            if n['ticker'] == 'null': continue
+            if n['ticker'] == 'null':
+                continue
 
             # check if notification is new or an update (= message hash did not exist before)
             if msg_hash not in old_notifications:
                 # search for msg_id in old notifications to see if this is an update
-                is_update_of = [h for h, o in old_notifications.items() if o['msg_id'] == n['msg_id']]
+                is_update_of = [h for h, o in old_notifications.items()
+                                if o['msg_id'] == n['msg_id']]
                 if is_update_of:
-                    logging.info(f"Update Message ({msg_hash}):")
-                    logging.info(n)
+                    #logging.info("Update Message (%s):", msg_hash)
+                    #logging.info(n)
 
                     if len(is_update_of) > 1:
-                        logging.warn("Warning: Multiple messages with same msg_id at the same time.")
+                        logging.warning("Warning: Multiple messages w same msg_id at the same time")
 
                     # send update
                     updated_hashes.add(is_update_of[0])
-                    interface.UpdateMessage(msg_hash, is_update_of[0], n['msg_id'], n['package_name'],
-                                            n['ticker'], n['title'], n['text'], n['is_foreground_msg'],
-                                            n['is_group_summary'], n['show_light'], n['when'])
+                    interface.UpdateMessage(msg_hash, is_update_of[0], n['msg_id'],
+                                            n['package_name'], n['ticker'], n['title'], n['text'],
+                                            n['is_foreground_msg'], n['is_group_summary'],
+                                            n['show_light'], n['when'])
                 else:
-                    logging.info(f"New Message ({msg_hash}):")
-                    logging.info(n)
+                    #logging.info("New Message (%s):", msg_hash)
+                    #logging.info(n)
 
                     # send new message
                     interface.NewMessage(msg_hash, n['msg_id'], n['package_name'], n['ticker'],
@@ -179,14 +181,14 @@ def get_notifications(old_notification):
         # send removal messages
         for msg_hash in old_notifications:
             if msg_hash not in notifications and msg_hash not in updated_hashes:
-                logging.info(f"Send removal message: {msg_hash}")
+                #logging.info(f"Send removal message: {msg_hash}")
                 interface.DeleteMessage(msg_hash)
 
         old_notifications = notifications
         notifications = {}
         time.sleep(3)
 
-def start(args):
+def start(_args):
     global running
     global loop_thread
 
@@ -194,9 +196,8 @@ def start(args):
     loop_thread = threading.Thread(target=get_notifications, args=({},))
     loop_thread.start()
 
-def stop(args):
+def stop(_args):
     global running
-    global loop_thread
 
     running = False
     if loop_thread is not None:

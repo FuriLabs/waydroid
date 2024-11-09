@@ -16,45 +16,44 @@ main_loop = None
 open_notifications = {}
 
 def stop_main_loop():
-    global main_loop
     if main_loop:
         main_loop.quit()
 
     return False
 
 def get_app_name(package_name):
-   args = helpers.arguments()
-   args.cache = {}
-   args.work = config.defaults["work"]
-   args.config = args.work + "/waydroid.cfg"
-   args.log = args.work + "/waydroid.log"
-   args.sudo_timer = True
-   args.timeout = 1800
+    args = helpers.arguments()
+    args.cache = {}
+    args.work = config.defaults["work"]
+    args.config = args.work + "/waydroid.cfg"
+    args.log = args.work + "/waydroid.log"
+    args.sudo_timer = True
+    args.timeout = 1800
 
-   ipc.DBusSessionService()
-   cm = ipc.DBusContainerService()
-   session = cm.GetSession()
-   if session["state"] == "FROZEN":
-       cm.Unfreeze()
+    ipc.DBusSessionService()
+    cm = ipc.DBusContainerService()
+    session = cm.GetSession()
+    if session["state"] == "FROZEN":
+        cm.Unfreeze()
 
-   platformService = IPlatform.get_service(args)
-   if platformService:
-       appsList = platformService.getAppsInfo()
-       app_name_dict = {app['packageName']: app['name'] for app in appsList}
-       app_name = app_name_dict.get(package_name)
-       return True, app_name
-   else:
-       logging.error("Failed to access IPlatform service")
+    platform_service = IPlatform.get_service(args)
+    if platform_service:
+        apps_list = platform_service.getAppsInfo()
+        app_name_dict = {app['packageName']: app['name'] for app in apps_list}
+        app_name = app_name_dict.get(package_name)
+        return True, app_name
 
-   if session["state"] == "FROZEN":
-       cm.Freeze()
+    logging.error("Failed to access IPlatform service")
 
-   return False, None
+    if session["state"] == "FROZEN":
+        cm.Freeze()
+
+    return False, None
 
 ### Notification click actions ###
 
 def on_action_invoked(pkg_name):
-    def launch_app(notification, action_key):
+    def launch_app(_, action_key):
         args = None
         if action_key == 'open':
             args = helpers.arguments()
@@ -70,10 +69,8 @@ def on_action_invoked(pkg_name):
 
 ### Calls to freedesktop notification API ###
 
-def notify_send(app_name, package_name, ticker, title, text, is_foreground_service, is_group_summary, show_light, updates_id):
-    if is_group_summary:
-        return
-
+def notify_send(app_name, package_name, ticker, title, text, _is_foreground_service,
+                show_light, updates_id):
     # When the title and text fields are not present, we choose an empty title
     # and the ticker as text.
     if title == '' or text == '':
@@ -81,8 +78,10 @@ def notify_send(app_name, package_name, ticker, title, text, is_foreground_servi
         text = ticker
 
     bus = dbus.SessionBus()
-    notification_service = bus.get_object('org.freedesktop.Notifications', '/org/freedesktop/Notifications')
-    notifications = dbus.Interface(notification_service, dbus_interface='org.freedesktop.Notifications')
+    notification_service = bus.get_object('org.freedesktop.Notifications',
+                                          '/org/freedesktop/Notifications')
+    notifications = dbus.Interface(notification_service,
+                                   dbus_interface='org.freedesktop.Notifications')
     notifications.connect_to_signal("ActionInvoked", on_action_invoked(package_name))
 
     return notifications.Notify(
@@ -99,8 +98,10 @@ def notify_send(app_name, package_name, ticker, title, text, is_foreground_servi
 
 def close_notification_send(notification_id):
     bus = dbus.SessionBus()
-    notification_service = bus.get_object('org.freedesktop.Notifications', '/org/freedesktop/Notifications')
-    notifications = dbus.Interface(notification_service, dbus_interface='org.freedesktop.Notifications')
+    notification_service = bus.get_object('org.freedesktop.Notifications',
+                                          '/org/freedesktop/Notifications')
+    notifications = dbus.Interface(notification_service,
+                                   dbus_interface='org.freedesktop.Notifications')
 
     notifications.CloseNotification(notification_id)
 
@@ -121,34 +122,30 @@ def try_and_loop(f):
 
 ### Callbacks for subscribed notification server signals ###
 
-def on_new_message(msg_hash, msg_id, package_name, ticker, title, text, is_foreground_service,
-                   is_group_summary, show_light, when):
+def on_new_message(msg_hash, _msg_id, package_name, ticker, title, text, is_foreground_service,
+                   is_group_summary, show_light, _when):
     #logging.info(f"Received new message notification: {msg_hash}, {msg_id}, {package_name}, " +
     #             f"{ticker}, {title}, {text}, {is_foreground_service}, {is_group_summary}, " +
     #             f"{show_light}, {when}")
-    global open_notifications
-
     def fun():
         ok, app_name = get_app_name(package_name)
-        if ok:
-            notification_id = notify_send(app_name, package_name, ticker, title, text, is_foreground_service,
-                                          is_group_summary, show_light, 0)
+        if ok and not is_group_summary:
+            notification_id = notify_send(app_name, package_name, ticker, title, text,
+                                          is_foreground_service, show_light, 0)
             open_notifications[msg_hash] = notification_id
 
     try_and_loop(fun)
 
-def on_update_message(msg_hash, replaces_hash, msg_id, package_name, ticker, title, text,
-                      is_foreground_service, is_group_summary, show_light, when):
+def on_update_message(msg_hash, replaces_hash, _msg_id, package_name, ticker, title, text,
+                      is_foreground_service, _is_group_summary, show_light, _when):
     #logging.info(f"Received update message notification: {msg_hash}, {replaces_hash}, " +
-    #             f"{msg_id}, {package_name}, {ticker}, {title}, {text}, " +
-    #             f"{is_foreground_service}, {is_group_summary}, {show_light}, {when}")
-    global open_notifications
-
+    #             f"{_msg_id}, {package_name}, {ticker}, {title}, {text}, " +
+    #             f"{is_foreground_service}, {_is_group_summary}, {show_light}, {_when}")
     def fun():
         ok, app_name = get_app_name(package_name)
         if ok and replaces_hash in open_notifications:
             notification_id = notify_send(app_name, package_name, ticker, title, text,
-                                          is_foreground_service, is_group_summary, show_light,
+                                          is_foreground_service, show_light,
                                           open_notifications[replaces_hash])
             open_notifications[msg_hash] = notification_id
             del open_notifications[replaces_hash]
@@ -158,8 +155,6 @@ def on_update_message(msg_hash, replaces_hash, msg_id, package_name, ticker, tit
 # on android, a notification disappeared (and was not replaced by another)
 def on_delete_message(msg_hash):
     #logging.info(f"Received delete message notification: {msg_hash}")
-    global open_notifications
-
     def fun():
         if msg_hash in open_notifications:
             close_notification_send(open_notifications[msg_hash])
@@ -167,7 +162,7 @@ def on_delete_message(msg_hash):
 
     try_and_loop(fun)
 
-def start(args):
+def start(_args):
     global main_loop
     if main_loop is not None:
         logging.info("Notification client is already running.")
@@ -203,7 +198,7 @@ def start(args):
     main_loop = GLib.MainLoop()
     main_loop.run()
 
-def stop(args):
+def stop(_args):
     global main_loop
     if main_loop is None:
         logging.info("Notification client service is not running.")
