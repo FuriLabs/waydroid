@@ -13,9 +13,7 @@ from tools.interfaces import IPlatform
 from tools.actions import app_manager
 
 main_loop = None
-
-pkg_name = ""
-app_notifications = {}
+open_notifications = {}
 
 def stop_main_loop():
     global main_loop
@@ -24,85 +22,150 @@ def stop_main_loop():
 
     return False
 
-def on_action_invoked(notification, action_key):
-    args = None
-    global pkg_name
-    if action_key == 'open':
-        args = helpers.arguments()
-        args.cache = {}
-        args.work = config.defaults["work"]
-        args.config = args.work + "/waydroid.cfg"
-        args.log = args.work + "/waydroid.log"
-        args.sudo_timer = True
-        args.timeout = 1800
-        args.PACKAGE = f"{pkg_name}"
-        app_manager.launch(args)
+def get_app_name(package_name):
+   args = helpers.arguments()
+   args.cache = {}
+   args.work = config.defaults["work"]
+   args.config = args.work + "/waydroid.cfg"
+   args.log = args.work + "/waydroid.log"
+   args.sudo_timer = True
+   args.timeout = 1800
 
-def on_new_message(package_name, count):
-    # logging.info(f"Received new message notification: packagename = {package_name}, count = {count}")
+   ipc.DBusSessionService()
+   cm = ipc.DBusContainerService()
+   session = cm.GetSession()
+   if session["state"] == "FROZEN":
+       cm.Unfreeze()
 
-    global pkg_name
-    args = None
-    app_name_dict = {}
-    try:
-        args = helpers.arguments()
-        args.cache = {}
-        args.work = config.defaults["work"]
-        args.config = args.work + "/waydroid.cfg"
-        args.log = args.work + "/waydroid.log"
-        args.sudo_timer = True
-        args.timeout = 1800
+   platformService = IPlatform.get_service(args)
+   if platformService:
+       appsList = platformService.getAppsInfo()
+       app_name_dict = {app['packageName']: app['name'] for app in appsList}
+       app_name = app_name_dict.get(package_name)
+       return True, app_name
+   else:
+       logging.error("Failed to access IPlatform service")
 
-        ipc.DBusSessionService()
-        cm = ipc.DBusContainerService()
-        session = cm.GetSession()
-        if session["state"] == "FROZEN":
-            cm.Unfreeze()
+   if session["state"] == "FROZEN":
+       cm.Freeze()
 
-        platformService = IPlatform.get_service(args)
-        if platformService:
-            appsList = platformService.getAppsInfo()
-            app_name_dict = {app['packageName']: app['name'] for app in appsList}
-            app_name = app_name_dict.get(package_name)
-            pkg_name = package_name
-            notify_send(app_name, count)
-        else:
-            logging.error("Failed to access IPlatform service")
+   return False, None
 
-        if session["state"] == "FROZEN":
-            cm.Freeze()
+### Notification click actions ###
 
-    except dbus.DBusException:
-        logging.error("WayDroid session is stopped")
+def on_action_invoked(pkg_name):
+    def launch_app(notification, action_key):
+        args = None
+        if action_key == 'open':
+            args = helpers.arguments()
+            args.cache = {}
+            args.work = config.defaults["work"]
+            args.config = args.work + "/waydroid.cfg"
+            args.log = args.work + "/waydroid.log"
+            args.sudo_timer = True
+            args.timeout = 1800
+            args.PACKAGE = f"{pkg_name}"
+            app_manager.launch(args)
+    return launch_app
 
-def notify_send(app_name, count):
-    global main_loop
+### Calls to freedesktop notification API ###
+
+def notify_send(app_name, package_name, ticker, title, text, is_foreground_service, is_group_summary, show_light, updates_id):
+    if is_group_summary:
+        return
+
+    # When the title and text fields are not present, we choose an empty title
+    # and the ticker as text.
+    if title == '' or text == '':
+        title = ''
+        text = ticker
 
     bus = dbus.SessionBus()
     notification_service = bus.get_object('org.freedesktop.Notifications', '/org/freedesktop/Notifications')
     notifications = dbus.Interface(notification_service, dbus_interface='org.freedesktop.Notifications')
-    notifications.connect_to_signal("ActionInvoked", on_action_invoked)
+    notifications.connect_to_signal("ActionInvoked", on_action_invoked(package_name))
 
-    if app_name in app_notifications:
-        notif_id = app_notifications[app_name]['id']
-        notifications.CloseNotification(notif_id)
-
-    new_notif_id = notifications.Notify(
+    return notifications.Notify(
         app_name,
-        0,
-        "/usr/share/icons/hicolor/512x512/apps/waydroid.png",
-        f"{app_name}",
-        f"You have {count} notification(s)",
+        updates_id,
+        config.session_defaults["waydroid_data"] + "/icons/"
+        + package_name + ".png",
+        title,
+        text,
         ['default', 'Open', 'open', 'Open'],
-        {'urgency': 1},
+        {'urgency': 1 if show_light else 0},
         5000
     )
 
-    app_notifications[app_name] = {'id': new_notif_id, 'count': count}
+def close_notification_send(notification_id):
+    bus = dbus.SessionBus()
+    notification_service = bus.get_object('org.freedesktop.Notifications', '/org/freedesktop/Notifications')
+    notifications = dbus.Interface(notification_service, dbus_interface='org.freedesktop.Notifications')
+
+    notifications.CloseNotification(notification_id)
+
+### Helper functions ###
+
+def try_and_loop(f):
+    global main_loop
+
+    try:
+        f()
+    except dbus.DBusException:
+        logging.error("WayDroid session is stopped")
 
     GLib.timeout_add_seconds(3, stop_main_loop)
     main_loop = GLib.MainLoop()
     main_loop.run()
+
+
+### Callbacks for subscribed notification server signals ###
+
+def on_new_message(msg_hash, msg_id, package_name, ticker, title, text, is_foreground_service,
+                   is_group_summary, show_light, when):
+    #logging.info(f"Received new message notification: {msg_hash}, {msg_id}, {package_name}, " +
+    #             f"{ticker}, {title}, {text}, {is_foreground_service}, {is_group_summary}, " +
+    #             f"{show_light}, {when}")
+    global open_notifications
+
+    def fun():
+        ok, app_name = get_app_name(package_name)
+        if ok:
+            notification_id = notify_send(app_name, package_name, ticker, title, text, is_foreground_service,
+                                          is_group_summary, show_light, 0)
+            open_notifications[msg_hash] = notification_id
+
+    try_and_loop(fun)
+
+def on_update_message(msg_hash, replaces_hash, msg_id, package_name, ticker, title, text,
+                      is_foreground_service, is_group_summary, show_light, when):
+    #logging.info(f"Received update message notification: {msg_hash}, {replaces_hash}, " +
+    #             f"{msg_id}, {package_name}, {ticker}, {title}, {text}, " +
+    #             f"{is_foreground_service}, {is_group_summary}, {show_light}, {when}")
+    global open_notifications
+
+    def fun():
+        ok, app_name = get_app_name(package_name)
+        if ok and replaces_hash in open_notifications:
+            notification_id = notify_send(app_name, package_name, ticker, title, text,
+                                          is_foreground_service, is_group_summary, show_light,
+                                          open_notifications[replaces_hash])
+            open_notifications[msg_hash] = notification_id
+            del open_notifications[replaces_hash]
+
+    try_and_loop(fun)
+
+# on android, a notification disappeared (and was not replaced by another)
+def on_delete_message(msg_hash):
+    #logging.info(f"Received delete message notification: {msg_hash}")
+    global open_notifications
+
+    def fun():
+        if msg_hash in open_notifications:
+            close_notification_send(open_notifications[msg_hash])
+            del open_notifications[msg_hash]
+
+    try_and_loop(fun)
 
 def start(args):
     global main_loop
@@ -118,6 +181,20 @@ def start(args):
     system_bus.add_signal_receiver(
         on_new_message,
         signal_name="NewMessage",
+        dbus_interface='id.waydro.Notification',
+        bus_name='id.waydro.Notification',
+        path='/id/waydro/Notification'
+    )
+    system_bus.add_signal_receiver(
+        on_update_message,
+        signal_name="UpdateMessage",
+        dbus_interface='id.waydro.Notification',
+        bus_name='id.waydro.Notification',
+        path='/id/waydro/Notification'
+    )
+    system_bus.add_signal_receiver(
+        on_delete_message,
+        signal_name="DeleteMessage",
         dbus_interface='id.waydro.Notification',
         bus_name='id.waydro.Notification',
         path='/id/waydro/Notification'
