@@ -14,6 +14,7 @@ from tools.actions import app_manager
 
 main_loop = None
 open_notifications = {}
+action_handlers = {}
 
 def stop_main_loop():
     if main_loop:
@@ -52,9 +53,14 @@ def get_app_name(package_name):
 
 ### Notification click actions ###
 
-def on_action_invoked(pkg_name):
-    def launch_app(_, action_key):
-        args = None
+def on_action_invoked(notification_id, action_key):
+    if notification_id in action_handlers:
+        handler = action_handlers[notification_id]
+        handler(action_key)
+        del action_handlers[notification_id]
+
+def create_action_handler(pkg_name):
+    def handler(action_key):
         if action_key == 'open':
             args = helpers.arguments()
             args.cache = {}
@@ -63,14 +69,16 @@ def on_action_invoked(pkg_name):
             args.log = args.work + "/waydroid.log"
             args.sudo_timer = True
             args.timeout = 1800
-            args.PACKAGE = f"{pkg_name}"
+            args.PACKAGE = pkg_name
             app_manager.launch(args)
-    return launch_app
+    return handler
 
 ### Calls to freedesktop notification API ###
 
 def notify_send(app_name, package_name, ticker, title, text, _is_foreground_service,
                 show_light, updates_id):
+    notification_id = 0
+
     # When the title and text fields are not present, we choose an empty title
     # and the ticker as text.
     if title == '' or text == '':
@@ -82,9 +90,9 @@ def notify_send(app_name, package_name, ticker, title, text, _is_foreground_serv
                                           '/org/freedesktop/Notifications')
     notifications = dbus.Interface(notification_service,
                                    dbus_interface='org.freedesktop.Notifications')
-    notifications.connect_to_signal("ActionInvoked", on_action_invoked(package_name))
+    notifications.connect_to_signal("ActionInvoked", on_action_invoked)
 
-    return notifications.Notify(
+    notification_id = notifications.Notify(
         app_name,
         updates_id,
         config.session_defaults["waydroid_data"] + "/icons/"
@@ -96,6 +104,9 @@ def notify_send(app_name, package_name, ticker, title, text, _is_foreground_serv
         5000
     )
 
+    action_handlers[int(notification_id)] = create_action_handler(package_name)
+    return notification_id
+
 def close_notification_send(notification_id):
     bus = dbus.SessionBus()
     notification_service = bus.get_object('org.freedesktop.Notifications',
@@ -104,6 +115,9 @@ def close_notification_send(notification_id):
                                    dbus_interface='org.freedesktop.Notifications')
 
     notifications.CloseNotification(notification_id)
+
+    if notification_id in action_handlers:
+        del action_handlers[notification_id]
 
 ### Helper functions ###
 
@@ -124,9 +138,9 @@ def try_and_loop(f):
 
 def on_new_message(msg_hash, _msg_id, package_name, ticker, title, text, is_foreground_service,
                    is_group_summary, show_light, _when):
-    #logging.info(f"Received new message notification: {msg_hash}, {msg_id}, {package_name}, " +
+    #logging.info(f"Received new message notification: {msg_hash}, {_msg_id}, {package_name}, " +
     #             f"{ticker}, {title}, {text}, {is_foreground_service}, {is_group_summary}, " +
-    #             f"{show_light}, {when}")
+    #             f"{show_light}, {_when}")
     def fun():
         ok, app_name = get_app_name(package_name)
         if ok and not is_group_summary:

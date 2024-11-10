@@ -148,7 +148,8 @@ def get_notifications(_old_notification):
             # this happens e.g. for foreground applications when they start.
             # currently they are ignored, but they could also be transformed
             # into a "<app> started in background" message
-            if n['ticker'] == 'null':
+            if (n['ticker'] == 'null' or n['ticker'] == '') and (n['title'] == '' or n['text'] == ''):
+                logging.error("Ticker is null and title or text are empty. skipping")
                 continue
 
             # check if notification is new or an update (= message hash did not exist before)
