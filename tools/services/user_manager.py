@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import logging
 import os
+import dbus
 import threading
 import tools.config
 import tools.helpers.net
@@ -104,9 +105,39 @@ Icon={waydroid_data}/icons/com.android.settings.png
                     if makeDesktopFile(appInfo) == -1:
                         os.remove(desktop_file_path)
 
+    def setup_dbus_signals():
+        bus = dbus.SystemBus()
+
+        bus.add_signal_receiver(
+            userUnlocked,
+            signal_name='userUnlocked',
+            dbus_interface='id.waydro.StateChange',
+            bus_name='id.waydro.StateChange'
+        )
+
+        bus.add_signal_receiver(
+            packageStateChanged,
+            signal_name='packageStateChanged',
+            dbus_interface='id.waydro.StateChange',
+            bus_name='id.waydro.StateChange'
+        )
+
     def service_thread():
+        import dbus.mainloop.glib
+        from gi.repository import GLib
+
+        dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+        setup_dbus_signals()
+
+        args.userMonitorLoop = GLib.MainLoop()
         while not stopping:
-            IUserMonitor.add_service(args, userUnlocked, packageStateChanged)
+            try:
+                args.userMonitorLoop.run()
+            except Exception as e:
+                logging.error(f"Error in user monitor loop: {e}")
+                if not stopping:
+                    continue
+                break
 
     global stopping
     stopping = False
