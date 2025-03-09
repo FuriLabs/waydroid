@@ -10,6 +10,7 @@ from time import time
 import asyncio
 import aiohttp
 import aiofiles
+import aiosqlite
 import functools
 import json
 import msgspec
@@ -22,6 +23,7 @@ from dbus_fast import BusType, Variant
 
 DEFAULT_REPO_CONFIG_DIR = "/usr/lib/android-store/repos"
 CUSTOM_REPO_CONFIG_DIR = "/etc/android-store/repos"
+DATABASE = os.path.expanduser("~/.cache/android-store/android-store.db")
 CACHE_DIR = os.path.expanduser("~/.cache/android-store/repo")
 DOWNLOAD_CACHE_DIR = os.path.expanduser("~/.cache/android-store/downloads")
 IDLE_TIMEOUT = 120
@@ -32,6 +34,7 @@ class FDroidInterface(ServiceInterface):
         super().__init__('io.FuriOS.AndroidStore.fdroid')
         self.verbose = verbose
         self.session = None
+        self.db = None
         self.idle_callback = idle_callback
         self.idle_timer = None
 
@@ -44,6 +47,45 @@ class FDroidInterface(ServiceInterface):
 
         # Start the idle timer
         self._reset_idle_timer()
+
+    async def init_db(self):
+        os.makedirs(CACHE_DIR, exist_ok=True)
+
+        # Connect to the SQLite database asynchronously
+        self.db = await aiosqlite.connect(DATABASE)
+        # Optional performance tweaks:
+        # - Allow concurrent reads: conn.execute("PRAGMA journal_mode = WAL")
+        await self.db.execute("PRAGMA journal_mode = WAL")
+        # Create tables if they do not exist
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS apps (
+                repository TEXT NOT NULL,
+                package_id TEXT NOT NULL,
+                name TEXT,
+                summary TEXT,
+                description TEXT,
+                license TEXT,
+                categories TEXT,
+                author TEXT,
+                web_url TEXT,
+                source_url TEXT,
+                tracker_url TEXT,
+                changelog_url TEXT,
+                donation_url TEXT,
+                added_date TEXT,
+                last_updated TEXT,
+                package JSON,
+                PRIMARY KEY (repository, package_id)
+            )
+        """)
+
+        # Create an index for lower(name) to speed up searches
+        await self.db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_apps_lower_name ON apps(LOWER(name));
+        """)
+
+        await self.db.commit()
+        store_print("Database initialized", self.verbose)
 
     def _start_task_processor(self):
         """Start the async task processor if it's not already running"""
@@ -159,6 +201,97 @@ class FDroidInterface(ServiceInterface):
             return False
         except Exception as e:
             store_print(f"Error downloading index for {repo_url}: {e}", self.verbose)
+            return False
+
+    async def process_all_indexes_to_db(self):
+        """
+        Iterate through all repository index files in CACHE_DIR, parse them, and update
+        the apps table in one transaction.
+        """
+        rows = []
+        # Iterate over all subdirectories in CACHE_DIR (each repo should have its own folder)
+        for repo_dir in os.listdir(CACHE_DIR):
+            repo_path = os.path.join(CACHE_DIR, repo_dir)
+            index_path = os.path.join(repo_path, 'index-v2.json')
+            if not os.path.exists(index_path):
+                continue
+            try:
+                async with aiofiles.open(index_path, 'rb') as f:
+                    raw_data = await f.read()
+                index_data = msgspec.json.decode(raw_data)
+            except Exception as e:
+                store_print(f"Error processing {index_path}: {e}", self.verbose)
+                continue
+
+            # Process each package from the index
+            for package_id, package_data in index_data.get("packages", {}).items():
+                name = self.get_localized_text(package_data["metadata"].get("name", ""))
+                latest_version = self.get_latest_version(package_data["versions"])
+                if not latest_version:
+                    continue
+
+                package_info = self.get_package_info(package_id, package_data["metadata"], latest_version, repo_dir)
+
+                row = {
+                    "repository": repo_dir,
+                    "package_id": package_id,
+                    "name": name,
+                    "summary": self.get_localized_text(package_data["metadata"].get("summary", "N/A")),
+                    "description": self.get_localized_text(package_data["metadata"].get("description", "N/A")),
+                    "license": package_data["metadata"].get("license", "N/A"),
+                    "categories": json.dumps(package_data["metadata"].get("categories", [])),
+                    "author": package_data["metadata"].get("author", {}).get("name", "N/A"),
+                    "web_url": package_data["metadata"].get("webSite", "N/A"),
+                    "source_url": package_data["metadata"].get("sourceCode", "N/A"),
+                    "tracker_url": package_data["metadata"].get("issueTracker", "N/A"),
+                    "changelog_url": package_data["metadata"].get("changelog", "N/A"),
+                    "donation_url": json.dumps(package_data["metadata"].get("donate", [])),
+                    "added_date": package_data["metadata"].get("added", "N/A"),
+                    "last_updated": package_data["metadata"].get("lastUpdated", "N/A"),
+                    "package": json.dumps(package_info),
+                }
+                rows.append(row)
+
+        # If any rows were gathered, update the database in one transaction.
+        if rows:
+            async with self.db.execute("BEGIN TRANSACTION;"):
+                # full refresh, clear all previous entries.
+                await self.db.execute("DELETE FROM apps;")
+                await self.db.executemany(
+                    """
+                    INSERT INTO apps (
+                        repository, package_id, name, summary, description, license,
+                        categories, author, web_url, source_url, tracker_url, changelog_url,
+                        donation_url, added_date, last_updated, package
+                    )
+                    VALUES (
+                        :repository, :package_id, :name, :summary, :description, :license,
+                        :categories, :author, :web_url, :source_url, :tracker_url, :changelog_url,
+                        :donation_url, :added_date, :last_updated, :package
+                    )
+                    ON CONFLICT(repository, package_id) DO UPDATE SET
+                        name = excluded.name,
+                        summary = excluded.summary,
+                        description = excluded.description,
+                        license = excluded.license,
+                        categories = excluded.categories,
+                        author = excluded.author,
+                        web_url = excluded.web_url,
+                        source_url = excluded.source_url,
+                        tracker_url = excluded.tracker_url,
+                        changelog_url = excluded.changelog_url,
+                        donation_url = excluded.donation_url,
+                        added_date = excluded.added_date,
+                        last_updated = excluded.last_updated,
+                        package = excluded.package;
+                    """,
+                    rows,
+                )
+                await self.db.commit()
+            store_print("Database updated successfully from cached indexes", self.verbose)
+            return True
+        else:
+            store_print("No index data found in cache.", self.verbose)
             return False
 
     def get_localized_text(self, text_obj, lang='en-US'):
@@ -298,60 +431,37 @@ class FDroidInterface(ServiceInterface):
                 store_print("Container session manager is not started", self.verbose)
                 return json.dumps(results)
 
-            if not os.path.exists(CACHE_DIR):
-                store_print("Cache directory not found. Updating cache first", self.verbose)
-                await self.update_cache()
-
-            for repo_dir in os.listdir(CACHE_DIR):
-                index_path = os.path.join(CACHE_DIR, repo_dir, 'index-v2.json')
-                if not os.path.exists(index_path):
-                    continue
-
-                try:
-                    repo_url = None
-                    with open(os.path.join(DEFAULT_REPO_CONFIG_DIR, repo_dir), 'r') as f:
-                        for line in f:
-                            line = line.strip()
-                            if line and not line.startswith('#'):
-                                repo_url = line
-                                break
-
-                    if not repo_url:
-                        continue
-
-                    with open(index_path, 'rb') as f:
-                        index_data = msgspec.json.decode(f.read())
-
-                    for package_id, package_data in index_data['packages'].items():
-                        name = self.get_localized_text(package_data['metadata'].get('name', ''))
-                        if query.lower() in name.lower():
-                            latest_version = self.get_latest_version(package_data['versions'])
-                            if latest_version:
-                                package_info = self.get_package_info(package_id, package_data['metadata'], latest_version, repo_url)
-                                metadata = package_data['metadata']
-                                app_info = {
-                                    'repository': repo_dir,
-                                    'id': package_id,
-                                    'name': name,
-                                    'summary': self.get_localized_text(metadata.get('summary', 'N/A')),
-                                    'description': self.get_localized_text(metadata.get('description', 'N/A')),
-                                    'license': metadata.get('license', 'N/A'),
-                                    'categories': metadata.get('categories', []),
-                                    'author': metadata.get('author', {}).get('name', 'N/A'),
-                                    'web_url': metadata.get('webSite', 'N/A'),
-                                    'source_url': metadata.get('sourceCode', 'N/A'),
-                                    'tracker_url': metadata.get('issueTracker', 'N/A'),
-                                    'changelog_url': metadata.get('changelog', 'N/A'),
-                                    'donation_url': metadata.get('donate', 'N/A'),
-                                    'added_date': metadata.get('added', 'N/A'),
-                                    'last_updated': metadata.get('lastUpdated', 'N/A'),
-                                    'package': package_info
-                                }
-                                results.append(app_info)
-                                store_print(f"Search: found app {name}", self.verbose)
-                except Exception as e:
-                    store_print(f"Error parsing {index_path}: {e}", self.verbose)
-                    continue
+            # Use the database to perform the search.
+            sql_query = """
+                SELECT repository, package_id, name, summary, description, license,
+                    categories, author, web_url, source_url, tracker_url, 
+                    changelog_url, donation_url, added_date, last_updated, package
+                FROM apps
+                WHERE LOWER(name) LIKE LOWER(?)
+            """
+            # Wildcard search, e.g. "%query%"
+            async with self.db.execute(sql_query, (f"%{query}%",)) as cursor:
+                rows = await cursor.fetchall()
+                for row in rows:
+                    app_info = {
+                        'repository': row[0],
+                        'id': row[1],
+                        'name': row[2],
+                        'summary': row[3],
+                        'description': row[4],
+                        'license': row[5],
+                        'categories': json.loads(row[6]) if row[6] else None,
+                        'author': row[7],
+                        'web_url': row[8],
+                        'source_url': row[9],
+                        'tracker_url': row[10],
+                        'changelog_url': row[11],
+                        'donation_url': json.loads(row[12]) if row[12] else None,
+                        'added_date': row[13],
+                        'last_updated': row[14],
+                        'package': json.loads(row[15]) if row[15] else None
+                    }
+                    results.append(app_info)
             return json.dumps(results)
         return await self._queue_task(_search_task)
 
@@ -376,8 +486,6 @@ class FDroidInterface(ServiceInterface):
         return repo_success
 
     async def update_cache(self):
-        os.makedirs(CACHE_DIR, exist_ok=True)
-
         all_repo_files = set()
 
         if os.path.exists(CUSTOM_REPO_CONFIG_DIR) and os.path.isdir(CUSTOM_REPO_CONFIG_DIR):
@@ -403,6 +511,7 @@ class FDroidInterface(ServiceInterface):
 
         results = await asyncio.gather(*tasks)
         overall_success = all(results)
+        await self.process_all_indexes_to_db()
 
         await self.cleanup_session()
         return overall_success
@@ -739,6 +848,8 @@ class AndroidStoreService:
         self.bus = await MessageBus(bus_type=BusType.SESSION).connect()
 
         self.fdroid_interface = FDroidInterface(verbose=self.verbose, idle_callback=self.shutdown)
+        # Initialize the database
+        await self.fdroid_interface.init_db()
         self.bus.export('/fdroid', self.fdroid_interface)
 
         await self.bus.request_name('io.FuriOS.AndroidStore')
