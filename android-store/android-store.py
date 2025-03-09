@@ -61,6 +61,7 @@ class FDroidInterface(ServiceInterface):
             CREATE TABLE IF NOT EXISTS apps (
                 repository TEXT NOT NULL,
                 package_id TEXT NOT NULL,
+                repository_url TEXT NOT NULL,
                 name TEXT,
                 summary TEXT,
                 description TEXT,
@@ -189,14 +190,20 @@ class FDroidInterface(ServiceInterface):
         repo_cache_dir = os.path.join(CACHE_DIR, repo_name)
         os.makedirs(repo_cache_dir, exist_ok=True)
 
-        index_url = f"{repo_url.rstrip('/')}/index-v2.json"
+        repo_url = repo_url.rstrip('/')
+        index_url = f"{repo_url}/index-v2.json"
         try:
             async with self.session.get(index_url) as response:
                 if response.status == 200:
                     json_content = await response.read()
                     index_path = os.path.join(repo_cache_dir, 'index-v2.json')
+                    url_path = os.path.join(repo_cache_dir, "repo_url.txt")
+
                     async with aiofiles.open(index_path, 'wb') as f:
                         await f.write(json_content)
+                    async with aiofiles.open(url_path, 'w') as f:
+                        await f.write(repo_url)
+
                     return True
             return False
         except Exception as e:
@@ -213,12 +220,17 @@ class FDroidInterface(ServiceInterface):
         for repo_dir in os.listdir(CACHE_DIR):
             repo_path = os.path.join(CACHE_DIR, repo_dir)
             index_path = os.path.join(repo_path, 'index-v2.json')
-            if not os.path.exists(index_path):
+            url_path = os.path.join(repo_path, 'repo_url.txt')
+
+            if not os.path.exists(index_path) or not os.path.exists(url_path):
                 continue
             try:
                 async with aiofiles.open(index_path, 'rb') as f:
                     raw_data = await f.read()
                 index_data = msgspec.json.decode(raw_data)
+
+                async with aiofiles.open(url_path, 'r') as f:
+                    repository_url = await f.read()
             except Exception as e:
                 store_print(f"Error processing {index_path}: {e}", self.verbose)
                 continue
@@ -230,11 +242,11 @@ class FDroidInterface(ServiceInterface):
                 if not latest_version:
                     continue
 
-                package_info = self.get_package_info(package_id, package_data["metadata"], latest_version, repo_dir)
-
+                package_info = self.get_package_info(package_id, package_data["metadata"], latest_version, repository_url)
                 row = {
                     "repository": repo_dir,
                     "package_id": package_id,
+                    "repository_url": repository_url,
                     "name": name,
                     "summary": self.get_localized_text(package_data["metadata"].get("summary", "N/A")),
                     "description": self.get_localized_text(package_data["metadata"].get("description", "N/A")),
@@ -260,16 +272,17 @@ class FDroidInterface(ServiceInterface):
                 await self.db.executemany(
                     """
                     INSERT INTO apps (
-                        repository, package_id, name, summary, description, license,
+                        repository, package_id, repository_url, name, summary, description, license,
                         categories, author, web_url, source_url, tracker_url, changelog_url,
                         donation_url, added_date, last_updated, package
                     )
                     VALUES (
-                        :repository, :package_id, :name, :summary, :description, :license,
+                        :repository, :package_id, :repository_url, :name, :summary, :description, :license,
                         :categories, :author, :web_url, :source_url, :tracker_url, :changelog_url,
                         :donation_url, :added_date, :last_updated, :package
                     )
                     ON CONFLICT(repository, package_id) DO UPDATE SET
+                        repository_url = excluded.repository_url,
                         name = excluded.name,
                         summary = excluded.summary,
                         description = excluded.description,
@@ -311,15 +324,15 @@ class FDroidInterface(ServiceInterface):
 
         return latest[1]
 
-    def get_package_info(self, package_id, metadata, version_info, repo_url):
+    def get_package_info(self, package_id, metadata, version_info, repository_url):
         apk_name = version_info['file']['name']
-        download_url = f"{repo_url.rstrip('/')}{apk_name}"
+        download_url = f"{repository_url}{apk_name}"
 
         icon_url = 'N/A'
         if 'icon' in metadata:
             icon_path = self.get_localized_text(metadata['icon'])
             if isinstance(icon_path, dict) and 'name' in icon_path:
-                icon_url = f"{repo_url.rstrip('/')}{icon_path['name']}"
+                icon_url = f"{repository_url}{icon_path['name']}"
 
         manifest = version_info['manifest']
         return {
@@ -580,7 +593,7 @@ class FDroidInterface(ServiceInterface):
                         package_data = index_data['packages'][package_id]
                         latest_version = self.get_latest_version(package_data['versions'])
                         if latest_version:
-                            package_info = self.get_package_info(package_id, package_data['metadata'], latest_version, repo_url)
+                            package_info = self.get_package_info(package_id, package_data['metadata'], latest_version)
                             break
 
                 if not package_info:
@@ -696,44 +709,31 @@ class FDroidInterface(ServiceInterface):
         for app in installed_apps:
             package_name = app['packageName'].value
             current_version = app['versionName'].value
-            for repo_dir in os.listdir(CACHE_DIR):
-                index_path = os.path.join(CACHE_DIR, repo_dir, 'index-v2.json')
-                if not os.path.exists(index_path):
+
+            async with self.db.execute(
+                "SELECT repository, package, package_id, repository_url FROM apps WHERE package_id = ?",
+                (package_name,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+
+            for row in rows:
+                repository, package_json, package_id, repository_url = row
+                if not package_json:
                     continue
+                available_pkg = json.loads(package_json)
+                repo_version = available_pkg.get("version", "N/A")
 
-                try:
-                    repo_url = self.get_repo_url(repo_dir)
-                    if not repo_url:
-                        continue
-
-                    with open(index_path, 'rb') as f:
-                        index_data = msgspec.json.decode(f.read())
-
-                    if package_name in index_data['packages']:
-                        package_data = index_data['packages'][package_name]
-                        latest_version = self.get_latest_version(package_data['versions'])
-                        if latest_version:
-                            repo_version = latest_version['manifest']['versionName']
-                            if repo_version != current_version:
-                                package_info = self.get_package_info(
-                                    package_name,
-                                    package_data['metadata'],
-                                    latest_version,
-                                    repo_url
-                                )
-                                upgradable_info = {
-                                    'id': package_name,
-                                    'packageInfo': package_info,
-                                    'repo_url': repo_url,
-                                    'current_version': current_version,
-                                    'available_version': repo_version,
-                                    'name': self.get_localized_text(package_data['metadata'].get('name', package_name))
-                                }
-                                upgradable.append(upgradable_info)
-                                break
-                except Exception as e:
-                    store_print(f"Error parsing {index_path}: {e}", self.verbose)
-                    continue
+                if repo_version != current_version:
+                    upgradable_info = {
+                        'id': package_name,
+                        'packageInfo': available_pkg,
+                        'repo_url': repository_url,
+                        'current_version': current_version,
+                        'available_version': repo_version,
+                        'name': app['name'].value,
+                    }
+                    upgradable.append(upgradable_info)
+                    break
         return upgradable
 
     @method()
