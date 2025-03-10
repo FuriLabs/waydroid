@@ -12,7 +12,6 @@ import aiohttp
 import aiofiles
 import aiosqlite
 import functools
-import json
 import msgspec
 import sys
 import os
@@ -35,6 +34,8 @@ class FDroidInterface(ServiceInterface):
         self.verbose = verbose
         self.session = None
         self.db = None
+        self.json_enc = msgspec.json.Encoder()
+
         self.idle_callback = idle_callback
         self.idle_timer = None
 
@@ -251,16 +252,16 @@ class FDroidInterface(ServiceInterface):
                     "summary": self.get_localized_text(package_data["metadata"].get("summary", "N/A")),
                     "description": self.get_localized_text(package_data["metadata"].get("description", "N/A")),
                     "license": package_data["metadata"].get("license", "N/A"),
-                    "categories": json.dumps(package_data["metadata"].get("categories", [])),
+                    "categories": self.json_enc.encode(package_data["metadata"].get("categories", [])),
                     "author": package_data["metadata"].get("author", {}).get("name", "N/A"),
                     "web_url": package_data["metadata"].get("webSite", "N/A"),
                     "source_url": package_data["metadata"].get("sourceCode", "N/A"),
                     "tracker_url": package_data["metadata"].get("issueTracker", "N/A"),
                     "changelog_url": package_data["metadata"].get("changelog", "N/A"),
-                    "donation_url": json.dumps(package_data["metadata"].get("donate", [])),
+                    "donation_url": self.json_enc.encode(package_data["metadata"].get("donate", [])),
                     "added_date": package_data["metadata"].get("added", "N/A"),
                     "last_updated": package_data["metadata"].get("lastUpdated", "N/A"),
-                    "package": json.dumps(package_info),
+                    "package": self.json_enc.encode(package_info),
                 }
                 rows.append(row)
 
@@ -421,7 +422,7 @@ class FDroidInterface(ServiceInterface):
             ping = await self.ping_session_manager()
             if not ping:
                 store_print("Container session manager is not started", self.verbose)
-                return json.dumps(results)
+                return self.json_enc.encode(results)
 
             # Use the database to perform the search.
             sql_query = """
@@ -454,7 +455,7 @@ class FDroidInterface(ServiceInterface):
                         'package': json.loads(row[15]) if row[15] else None
                     }
                     results.append(app_info)
-            return json.dumps(results)
+            return self.json_enc.encode(results)
         return await self._queue_task(_search_task)
 
     async def process_repo_file(self, config_file, repo_dir):
@@ -646,7 +647,7 @@ class FDroidInterface(ServiceInterface):
                     'currentVersion': Variant('s', pkg['current_version']),
                     'availableVersion': Variant('s', pkg['available_version']),
                     'repository': Variant('s', pkg['repo_url']),
-                    'package': Variant('s', json.dumps(pkg['packageInfo']))
+                    'package': Variant('s', self.json_enc.encode(pkg['packageInfo']))
                 }
                 upgradable.append(upgradable_info)
                 store_print(f"{upgradable_info['packageName'].value} {upgradable_info['name'].value} {upgradable_info['currentVersion'].value} {upgradable_info['availableVersion'].value}", self.verbose)
