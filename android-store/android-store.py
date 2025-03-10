@@ -382,31 +382,6 @@ class FDroidInterface(ServiceInterface):
             store_print(f"Error removing app: {e}", self.verbose)
             return False
 
-    def get_repo_url(self, repo_file):
-        """Get the URL for a repository, prioritizing custom directory over default"""
-        custom_path = os.path.join(CUSTOM_REPO_CONFIG_DIR, repo_file)
-        if os.path.exists(custom_path) and os.path.isfile(custom_path):
-            try:
-                with open(custom_path, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            return line
-            except Exception as e:
-                store_print(f"Error reading {custom_path}: {e}", self.verbose)
-
-        default_path = os.path.join(DEFAULT_REPO_CONFIG_DIR, repo_file)
-        if os.path.exists(default_path) and os.path.isfile(default_path):
-            try:
-                with open(default_path, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            return line
-            except Exception as e:
-                store_print(f"Error reading {default_path}: {e}", self.verbose)
-        return None
-
     async def get_apps_info(self):
         try:
             bus = await MessageBus(bus_type=BusType.SESSION).connect()
@@ -554,47 +529,22 @@ class FDroidInterface(ServiceInterface):
 
             try:
                 package_info = None
-                for repo_dir in os.listdir(CACHE_DIR):
-                    index_path = os.path.join(CACHE_DIR, repo_dir, 'index-v2.json')
-                    if not os.path.exists(index_path):
-                        continue
+                sql_query = """
+                    SELECT repository, package
+                    FROM apps
+                    WHERE package_id = ?
+                """
 
-                    repo_url = self.get_repo_url(repo_dir)
-                    if not repo_url:
-                        continue
-
-                    if not os.path.exists(index_path):
-                        continue
-
-                    repo_locations = {}  # Define repo_locations since it's missing in the original code
-                    config_dir = repo_locations.get(repo_dir, DEFAULT_REPO_CONFIG_DIR)
-
-                    if not os.path.exists(os.path.join(config_dir, repo_dir)):
-                        alt_config_dir = CUSTOM_REPO_CONFIG_DIR if config_dir == DEFAULT_REPO_CONFIG_DIR else DEFAULT_REPO_CONFIG_DIR
-                        if os.path.exists(os.path.join(alt_config_dir, repo_dir)):
-                            config_dir = alt_config_dir
-                        else:
-                            continue
-
-                    with open(os.path.join(config_dir, repo_dir), 'r') as f:
-                        for line in f:
-                            line = line.strip()
-                            if line and not line.startswith('#'):
-                                repo_url = line
-                                break
-
-                    if not repo_url:
-                        continue
-
-                    with open(index_path, 'rb') as f:
-                        index_data = msgspec.json.decode(f.read())
-
-                    if package_id in index_data['packages']:
-                        package_data = index_data['packages'][package_id]
-                        latest_version = self.get_latest_version(package_data['versions'])
-                        if latest_version:
-                            package_info = self.get_package_info(package_id, package_data['metadata'], latest_version)
-                            break
+                async with self.db.execute(sql_query, (package_id,)) as cursor:
+                    rows = await cursor.fetchall()
+                    if len(rows) > 1:
+                        store_print(f"Multiple entries found for {package_id}", self.verbose)
+                    
+                    for row in rows:
+                        repository, package_json = row
+                        store_print(f"Found package {package_id} in {repository}", self.verbose)
+                        package_info = json.loads(package_json)
+                        break
 
                 if not package_info:
                     store_print(f"Package {package_id} not found", self.verbose)
@@ -639,7 +589,7 @@ class FDroidInterface(ServiceInterface):
 
             ping = await self.ping_session_manager()
             if not ping:
-                store_print(f"Container session manager is not started", self.verbose)
+                store_print("Container session manager is not started", self.verbose)
                 return repositories
 
             repo_files = {}  # filename -> (repo_dir, url)
