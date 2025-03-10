@@ -264,6 +264,10 @@ class FDroidInterface(ServiceInterface):
                 }
                 rows.append(row)
 
+            # Clean up the index files after processing to prevent reprocessing
+            os.remove(index_path)
+            os.remove(url_path)
+
         # If any rows were gathered, update the database in one transaction.
         if rows:
             async with self.db.execute("BEGIN TRANSACTION;"):
