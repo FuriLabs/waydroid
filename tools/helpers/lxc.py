@@ -50,6 +50,7 @@ def generate_nodes_lxc_config(args):
     make_entry("/dev/ion")
     make_entry("/dev/tty")
     make_entry("/dev/char", options="bind,create=dir,optional 0 0")
+    make_entry("/dev/rfkill")
 
     # Graphic dev nodes
     make_entry("/dev/kgsl-3d0")
@@ -124,6 +125,10 @@ def generate_nodes_lxc_config(args):
 
     # DBus system bus for AIDL radio
     make_entry("/var/run/dbus", "var", options="rbind,optional 0 0")
+
+    # WiFi
+    make_entry("/sys/class/ieee80211", "sys/class/ieee80211", options="rbind,create=dir,optional 0 0", check=False)
+    make_entry("/sys/devices/virtual/ieee80211", "sys/devices/virtual/ieee80211", options="rbind,create=dir,optional 0 0", check=False)
 
     return nodes
 
