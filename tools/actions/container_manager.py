@@ -269,6 +269,14 @@ def do_start(args, session):
             helpers.mount.bind(args, session["andromeda_data"],
                                tools.config.defaults["data"])
 
+    # mac80211_hwsim for wlan0 simulation
+    command = ["modprobe", "mac80211_hwsim", "radios=1"]
+    tools.helpers.run.user(args, command, check=False)
+
+    time.sleep(1)
+    if os.path.exists("/sys/class/net/wlan0_hwsim"):
+        helpers.lxc.set_lxc_hwsim(args)
+
     # Mount rootfs
     cfg = tools.config.load(args)
     helpers.images.mount_rootfs(args, cfg["andromeda"]["images_path"], session)
@@ -304,6 +312,11 @@ def stop(args, quit_session=True):
         if which("systemctl") and (tools.helpers.run.user(args, ["systemctl", "is-enabled", "-q", "nfcd"], check=False) == 0):
             command = ["systemctl", "start", "nfcd"]
             tools.helpers.run.user(args, command, check=False)
+
+
+        # mac80211_hwsim for wlan0 simulation
+        command = ["rmmod", "mac80211_hwsim"]
+        tools.helpers.run.user(args, command, check=False)
 
         if "session" in args:
             if quit_session:

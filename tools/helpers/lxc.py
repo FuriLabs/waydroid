@@ -171,6 +171,27 @@ def set_lxc_config(args):
     # Create empty file
     open(os.path.join(lxc_path, "config_session"), mode="w").close()
 
+def set_lxc_hwsim(args):
+    config_path = os.path.join(tools.config.defaults["lxc"], "andromeda", "config")
+
+    config_block = [
+        "lxc.net.1.type = phys",
+        "lxc.net.1.link = wlan0_hwsim",
+        "lxc.net.1.flags = up",
+        "lxc.net.1.name = wlan0"
+    ]
+
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            content = f.read()
+            if any(line in content for line in config_block):
+                return
+
+    with open(config_path, "a") as f:
+        f.write("\n# Runtime wlan0_hwsim config\n")
+        for line in config_block:
+            f.write(line + "\n")
+
 def generate_session_lxc_config(args, session):
     nodes = []
     def make_entry(src, dist=None, mnt_type="none", options="rbind,create=file 0 0"):
