@@ -188,6 +188,8 @@ def mount_rootfs(args, images_dir, session):
                                 apexes_dir,
                                 False
                             )
+
+                            helpers.mount.bind(args, apexes_dir, tools.config.defaults["rootfs"] + "/apex")
                     except ValueError:
                         logging.warning(f"Invalid SDK version value: {sdk_value}")
                     break
