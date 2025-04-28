@@ -173,6 +173,21 @@ def mount_rootfs(args, images_dir, session):
                                 apexes_dir,
                                 False
                             )
+                            helpers.apex.mount_apexes(
+                                tools.config.defaults["rootfs"] + "/system_ext/apex/",
+                                apexes_dir,
+                                False
+                            )
+                            helpers.apex.mount_apexes(
+                                tools.config.defaults["rootfs"] + "/vendor/apex/",
+                                apexes_dir,
+                                False
+                            )
+                            helpers.apex.mount_apexes(
+                                tools.config.defaults["rootfs"] + "/product/apex/",
+                                apexes_dir,
+                                False
+                            )
                     except ValueError:
                         logging.warning(f"Invalid SDK version value: {sdk_value}")
                     break
