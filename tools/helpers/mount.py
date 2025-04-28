@@ -21,7 +21,7 @@ def ismount(folder):
                 return True
     return False
 
-def bind(args, source, destination, create_folders=True, umount=False):
+def bind(args, source, destination, create_folders=True, umount=False, rbind=False):
     """
     Mount --bind a folder and create necessary directory structure.
     :param umount: when destination is already a mount point, umount it first.
@@ -44,7 +44,10 @@ def bind(args, source, destination, create_folders=True, umount=False):
                                path)
 
     # Actually mount the folder
-    tools.helpers.run.user(args, ["mount", "-o", "bind", source, destination])
+    if rbind:
+        tools.helpers.run.user(args, ["mount", "-o", "rbind", source, destination])
+    else:
+        tools.helpers.run.user(args, ["mount", "-o", "bind", source, destination])
 
     # Verify, that it has worked
     if not ismount(destination):
