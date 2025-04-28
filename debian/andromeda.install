@@ -25,6 +25,7 @@ usr/lib/andromeda/tools/config/__init__.py
 usr/lib/andromeda/tools/config/load.py
 usr/lib/andromeda/tools/config/save.py
 usr/lib/andromeda/tools/helpers/__init__.py
+usr/lib/andromeda/tools/helpers/apex.py
 usr/lib/andromeda/tools/helpers/arch.py
 usr/lib/andromeda/tools/helpers/arguments.py
 usr/lib/andromeda/tools/helpers/drivers.py

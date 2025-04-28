@@ -50,6 +50,7 @@ defaults["data"] = defaults["work"] + "/data"
 defaults["lxc"] = defaults["work"] + "/lxc"
 defaults["host_perms"] = defaults["work"] + "/host-permissions"
 defaults["container_pulse_runtime_path"] = defaults["container_xdg_runtime_dir"] + "/pulse"
+defaults["apexes"] = defaults["work"] + "/apexes"
 
 session_defaults = {
     "user_name": pwd.getpwuid(os.getuid()).pw_name,

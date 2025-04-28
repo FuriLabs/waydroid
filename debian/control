@@ -33,6 +33,9 @@ Depends: ${misc:Depends},
          libglib2.0-bin,
          wl-clipboard,
          android-vibrator-hal,
+         mount,
+         unzip,
+         util-linux,
 Description: Android™ application support
  Andromeda allows running a separate Android™ environment
  confined to a LXC container.

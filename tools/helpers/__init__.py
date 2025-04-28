@@ -4,6 +4,7 @@
 
 from tools.helpers.arguments import arguments
 from tools.helpers.wayland_clipboard import WaylandClipboardHandler
+import tools.helpers.apex
 import tools.helpers.arch
 import tools.helpers.props
 import tools.helpers.lxc

@@ -157,5 +157,39 @@ def mount_rootfs(args, images_dir, session):
     elif os.path.exists(vendor_waydroid_prop):
         helpers.mount.bind_file(args, args.work + "/andromeda.prop", vendor_waydroid_prop)
 
+    system_build_prop = tools.config.defaults["rootfs"] + "/system/build.prop"
+    if os.path.exists(system_build_prop):
+        with open(system_build_prop, "r") as f:
+            for line in f:
+                if line.startswith("ro.system.build.version.sdk="):
+                    sdk_value = line.strip().split("=")[-1]
+                    try:
+                        sdk_version = int(sdk_value)
+                        if sdk_version >= 34:
+                            apexes_dir = tools.config.defaults["apexes"]
+                            os.makedirs(apexes_dir, exist_ok=True)
+                            helpers.apex.mount_apexes(
+                                tools.config.defaults["rootfs"] + "/system/apex/",
+                                apexes_dir,
+                                False
+                            )
+                    except ValueError:
+                        logging.warning(f"Invalid SDK version value: {sdk_value}")
+                    break
+
 def umount_rootfs(args):
+    system_build_prop = tools.config.defaults["rootfs"] + "/system/build.prop"
+    if os.path.exists(system_build_prop):
+        with open(system_build_prop, "r") as f:
+            for line in f:
+                if line.startswith("ro.system.build.version.sdk="):
+                    sdk_value = line.strip().split("=")[-1]
+                    try:
+                        sdk_version = int(sdk_value)
+                        if sdk_version >= 34:
+                            helpers.apex.unmount_apexes(tools.config.defaults["apexes"])
+                    except ValueError:
+                        logging.warning(f"Invalid SDK version value: {sdk_value}")
+                    break
+
     helpers.mount.umount_all(args, tools.config.defaults["rootfs"])
