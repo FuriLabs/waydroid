@@ -38,7 +38,7 @@ defaults = {
     ],
     "suspend_action": "freeze",
     "mount_overlays": "True",
-    "auto_adb": "True",
+    "auto_adb": "False",
     "andromedafs_enabled": "False",
     "container_xdg_runtime_dir": "/run/xdg",
     "container_wayland_display": "wayland-0",
