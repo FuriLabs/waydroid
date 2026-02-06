@@ -618,6 +618,8 @@ def get_nfc_status():
 
 def logcat(args):
     args.COMMAND = ["/system/bin/logcat"]
+    if args.ARGS:
+        args.COMMAND.extend(args.ARGS)
     args.uid = None
     args.gid = None
     args.nolsm = None
