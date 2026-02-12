@@ -32,6 +32,10 @@ LXC_IPV6_MASK=""
 LXC_IPV6_NETWORK=""
 LXC_IPV6_NAT="false"
 
+TTL_SUBNET="${LXC_NETWORK}"
+TTL_IFACE_PREFIX="ccmni+"
+TTL_VALUE="64"
+
 IPTABLES_BIN="$(command -v iptables-legacy)"
 if [ ! -n "$IPTABLES_BIN" ]; then
     IPTABLES_BIN="$(command -v iptables)"
@@ -83,6 +87,18 @@ start_ipv6() {
     fi
 }
 
+add_ttl_rule_iptables() {
+    $IPTABLES_BIN $use_iptables_lock -t mangle -C POSTROUTING -s "$TTL_SUBNET" -o "$TTL_IFACE_PREFIX" -j TTL --ttl-set "$TTL_VALUE" 2>/dev/null || \
+    $IPTABLES_BIN $use_iptables_lock -t mangle -A POSTROUTING -s "$TTL_SUBNET" -o "$TTL_IFACE_PREFIX" -j TTL --ttl-set "$TTL_VALUE"
+}
+
+del_ttl_rule_iptables() {
+    while $IPTABLES_BIN $use_iptables_lock -t mangle -C POSTROUTING -s "$TTL_SUBNET" -o "$TTL_IFACE_PREFIX" -j TTL --ttl-set "$TTL_VALUE" 2>/dev/null
+    do
+        $IPTABLES_BIN $use_iptables_lock -t mangle -D POSTROUTING -s "$TTL_SUBNET" -o "$TTL_IFACE_PREFIX" -j TTL --ttl-set "$TTL_VALUE" 2>/dev/null || break
+    done
+}
+
 start_iptables() {
     start_ipv6
     if [ -n "$LXC_IPV6_ARG" ] && [ "$LXC_IPV6_NAT" = "true" ]; then
@@ -96,6 +112,9 @@ start_iptables() {
     $IPTABLES_BIN $use_iptables_lock -I FORWARD -o ${LXC_BRIDGE} -j ACCEPT
     $IPTABLES_BIN $use_iptables_lock -t nat -A POSTROUTING -s ${LXC_NETWORK} ! -d ${LXC_NETWORK} -j MASQUERADE
     $IPTABLES_BIN $use_iptables_lock -t mangle -A POSTROUTING -o ${LXC_BRIDGE} -p udp -m udp --dport 68 -j CHECKSUM --checksum-fill
+
+    # Add TTL rule for modem egress
+    add_ttl_rule_iptables
 }
 
 start_nftables() {
@@ -118,10 +137,17 @@ add rule inet lxc input iifname ${LXC_BRIDGE} tcp dport { 53, 67 } accept;
 add chain inet lxc forward { type filter hook forward priority 0; };
 add rule inet lxc forward iifname ${LXC_BRIDGE} accept;
 add rule inet lxc forward oifname ${LXC_BRIDGE} accept;
+
 add table ip lxc;
 flush table ip lxc;
+
 add chain ip lxc postrouting { type nat hook postrouting priority 100; };
-add rule ip lxc postrouting ip saddr ${LXC_NETWORK} ip daddr != ${LXC_NETWORK} counter masquerade"
+add rule ip lxc postrouting ip saddr ${LXC_NETWORK} ip daddr != ${LXC_NETWORK} counter masquerade;
+
+# TTL mangle for modem egress
+add chain ip lxc postrouting_mangle { type route hook postrouting priority mangle; };
+add rule ip lxc postrouting_mangle ip saddr ${LXC_NETWORK} oifname \"ccmni*\" ip ttl set ${TTL_VALUE};
+"
     nft "${NFT_RULESET}"
 }
 
@@ -210,6 +236,9 @@ start() {
 }
 
 stop_iptables() {
+    # Remove TTL rule for modem egress
+    del_ttl_rule_iptables
+
     $IPTABLES_BIN $use_iptables_lock -D INPUT -i ${LXC_BRIDGE} -p udp --dport 67 -j ACCEPT
     $IPTABLES_BIN $use_iptables_lock -D INPUT -i ${LXC_BRIDGE} -p tcp --dport 67 -j ACCEPT
     $IPTABLES_BIN $use_iptables_lock -D INPUT -i ${LXC_BRIDGE} -p udp --dport 53 -j ACCEPT
