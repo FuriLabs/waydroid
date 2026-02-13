@@ -52,7 +52,7 @@ class StateChangeInterface(dbus.service.Object):
 
     @dbus.service.signal(dbus_interface='io.furios.Andromeda.StateChange', signature='s')
     def sendClipboardData(self, content):
-        logging.info(f"Signal: sendClipboardData emitted: content={content}")
+        logging.info(f"Signal: sendClipboardData emitted")
         pass
 
     @dbus.service.signal(dbus_interface='io.furios.Andromeda.StateChange', signature='b')
