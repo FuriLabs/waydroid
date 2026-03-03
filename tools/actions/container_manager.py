@@ -206,8 +206,8 @@ class DBusContainerManager(dbus.service.Object):
             logging.warning(f"Failed to unconfigure andromedafs mounts: {e}")
 
     @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='')
-    def NfcToggle(self):
-        nfc_toggle(self.args)
+    def ToggleNfc(self):
+        toggle_nfc(self.args)
 
     @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='b')
     def GetNfcStatus(self):
@@ -474,7 +474,7 @@ def remove_app(args, packageName):
     if status == "RUNNING":
         helpers.lxc.remove_app(args, packageName)
 
-def nfc_toggle(args):
+def toggle_nfc(args):
     status = helpers.lxc.status(args)
     if status == "RUNNING":
         helpers.lxc.toggle_nfc(args)
