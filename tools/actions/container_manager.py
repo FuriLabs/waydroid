@@ -84,8 +84,8 @@ class DBusContainerManager(dbus.service.Object):
         unfreeze(self.args)
 
     @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='')
-    def Screen(self):
-        screen(self.args)
+    def ToggleScreen(self):
+        toggle_screen(self.args)
 
     @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='b')
     def isAsleep(self):
@@ -458,10 +458,10 @@ def unfreeze(args):
         while helpers.lxc.status(args) == "FROZEN":
             pass
 
-def screen(args):
+def toggle_screen(args):
     status = helpers.lxc.status(args)
     if status == "RUNNING":
-        helpers.lxc.screen_toggle(args)
+        helpers.lxc.toggle_screen(args)
 
 def is_asleep(args):
     status = helpers.lxc.status(args)

@@ -499,7 +499,7 @@ def shell(args):
     if state == "FROZEN":
         freeze(args)
 
-def screen_toggle(args):
+def toggle_screen(args):
     screen_state = sleep_status()
     if screen_state:
         args.COMMAND = ['input', 'keyevent', '224']  # key_wakeup

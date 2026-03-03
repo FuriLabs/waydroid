@@ -146,13 +146,13 @@ class ScreenService:
                         cm.Setprop("furios.screen_off", expected_prop)
                         time.sleep(1)
                     if not is_asleep:
-                        cm.Screen()
+                        cm.ToggleScreen()
             else: # For screen ON (idle=False)
                 expected_prop = "false"
                 if current_prop != expected_prop or is_asleep:
                     logging.debug(f"Final state mismatch for ON state, fixing - prop={current_prop}, asleep={is_asleep}")
                     if is_asleep:
-                        cm.Screen()
+                        cm.ToggleScreen()
                         time.sleep(1)
                     if current_prop != expected_prop:
                         cm.Setprop("furios.screen_off", expected_prop)
@@ -243,7 +243,7 @@ class ScreenService:
             if not idle_hint: # Handle screen on (not idle)
                 if is_asleep or current_prop == "true":
                     logging.debug(f"Turning screen ON: prop={current_prop}, asleep={is_asleep}")
-                    cm.Screen()
+                    cm.ToggleScreen()
                     time.sleep(1)
                     cm.Setprop("furios.screen_off", "false")
                 else:
@@ -253,7 +253,7 @@ class ScreenService:
                     logging.debug(f"Turning screen OFF: prop={current_prop}, asleep={is_asleep}")
                     cm.Setprop("furios.screen_off", "true")
                     time.sleep(1)
-                    cm.Screen()
+                    cm.ToggleScreen()
                 else:
                     logging.debug(f"Screen already OFF: prop={current_prop}, asleep={is_asleep}")
         except Exception as e:
