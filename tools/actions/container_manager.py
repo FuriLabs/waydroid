@@ -91,10 +91,6 @@ class DBusContainerManager(dbus.service.Object):
     def isAsleep(self):
         return is_asleep(self.args)
 
-    @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='b')
-    def OpenAppPresent(self):
-        return open_app_present(self.args)
-
     @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='a{ss}')
     def GetSession(self):
         try:
@@ -467,11 +463,6 @@ def is_asleep(args):
     status = helpers.lxc.status(args)
     if status == "RUNNING":
         return helpers.lxc.sleep_status()
-
-def open_app_present(args):
-    status = helpers.lxc.status(args)
-    if status == "RUNNING":
-        return helpers.lxc.open_app_present()
 
 def install_base_apk(args):
     status = helpers.lxc.status(args)
