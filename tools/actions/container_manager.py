@@ -205,6 +205,11 @@ class DBusContainerManager(dbus.service.Object):
         except Exception as e:
             logging.warning(f"Failed to unconfigure andromedafs mounts: {e}")
 
+    @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='b')
+    def GetSharedFolderStatus(self):
+        cfg = tools.config.load(self.args)
+        return str(cfg["andromeda"]["andromedafs_enabled"]).lower() == "true"
+
     @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='')
     def ToggleNfc(self):
         toggle_nfc(self.args)
