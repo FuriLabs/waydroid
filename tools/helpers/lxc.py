@@ -560,7 +560,7 @@ def remove_app(args, packageName):
     shell(args)
 
 def toggle_nfc(args):
-    nfc_state = nfc_status()
+    nfc_state = get_nfc_status()
     if nfc_state:
         args.COMMAND = ['service', 'call', 'nfc', '7']  # stop
     else:
@@ -574,7 +574,7 @@ def toggle_nfc(args):
     args.context = None
     shell(args)
 
-def nfc_status():
+def get_nfc_status():
     command = ["lxc-attach", "-P", tools.config.defaults["lxc"], "-n", "andromeda", "--clear-env"] + \
               android_env_attach_options() + ["--", "dumpsys", "nfc"]
 

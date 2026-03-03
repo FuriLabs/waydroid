@@ -211,7 +211,7 @@ class DBusContainerManager(dbus.service.Object):
 
     @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='b')
     def GetNfcStatus(self):
-        return nfc_status(self.args)
+        return get_nfc_status(self.args)
 
     @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='')
     def ForceFinishSetup(self):
@@ -479,10 +479,10 @@ def toggle_nfc(args):
     if status == "RUNNING":
         helpers.lxc.toggle_nfc(args)
 
-def nfc_status(args):
+def get_nfc_status(args):
     status = helpers.lxc.status(args)
     if status == "RUNNING":
-        return helpers.lxc.nfc_status()
+        return helpers.lxc.get_nfc_status()
 
 def force_finish_setup(args):
     status = helpers.lxc.status(args)
