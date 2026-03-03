@@ -15,6 +15,7 @@ import subprocess
 import tools.config
 from tools import helpers
 from tools import services
+from tools.helpers import andromedafs
 import dbus
 import dbus.service
 import dbus.exceptions
@@ -24,6 +25,7 @@ class DBusContainerManager(dbus.service.Object):
     def __init__(self, looper, bus, object_path, args):
         self.args = args
         self.looper = looper
+        self.session = None
         dbus.service.Object.__init__(self, bus, object_path)
 
     @dbus.service.method(dbus_interface='org.freedesktop.DBus.Properties', in_signature='s', out_signature='a{sv}')
@@ -48,11 +50,28 @@ class DBusContainerManager(dbus.service.Object):
         pid = dbus_info.GetConnectionUnixProcessID(sender)
         if str(uid) != "0" and str(pid) != session["pid"]:
             raise RuntimeError("Invalid session pid")
+
+        self.session = session
         do_start(self.args, session)
         self.SessionStateChanged("started")
 
     @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='b', out_signature='')
     def Stop(self, quit_session):
+        if self.session:
+            try:
+                andromedafs.umount_andromedafs(
+                    self.args,
+                    os.path.join(tools.config.defaults["work"], "andromedafs-guest"),
+                    self.session["andromeda_data"],
+                )
+                andromedafs.umount_andromedafs(
+                    self.args,
+                    os.path.join(tools.config.defaults["work"], "andromedafs-host"),
+                    self.session["andromeda_data"],
+                )
+            except Exception as e:
+                logging.warning(f"Failed to unconfigure andromedafs mounts: {e}")
+
         stop(self.args, quit_session)
         self.SessionStateChanged("stopped")
 
@@ -95,17 +114,100 @@ class DBusContainerManager(dbus.service.Object):
 
     @dbus.service.method("io.furios.Andromeda.ContainerManager", out_signature='')
     def MountSharedFolder(self):
-        guest_dir = self.args.session['andromeda_data'] + '/media/0/Host'
-        host_dir = self.args.session['host_user'] + '/Android'
-        helpers.mount.bind(self.args, guest_dir, host_dir)
-        chmod(self.args, host_dir, "777")
+        cfg = tools.config.load(self.args)
+
+        cfg["andromeda"]["andromedafs_enabled"] = "True"
+        tools.config.save(self.args, cfg)
+
+        unlocked = False
+        try:
+            val = helpers.lxc.getprop("furios.android.userunlocked")
+            unlocked = (val or "").strip().lower() == "true"
+        except Exception as e:
+            logging.warning(f"Failed to read furios.android.userunlocked: {e}")
+            unlocked = False
+
+        if not unlocked:
+            return
+
+        if not self.session:
+            return
+
+        guest_mount = os.path.join(tools.config.defaults["work"], "andromedafs-guest")
+        host_mount = os.path.join(tools.config.defaults["work"], "andromedafs-host")
+
+        try:
+            andromedafs.mount_andromedafs(
+                self.args,
+                self.session["user_id"],
+                self.session["group_id"],
+                True,
+                "host",
+                self.session["host_user"],
+                host_mount,
+                self.session["andromeda_data"],
+            )
+
+            andromedafs.mount_andromedafs(
+                self.args,
+                self.session["user_id"],
+                self.session["group_id"],
+                True,
+                "android",
+                os.path.join(self.session["andromeda_data"], "media/0"),
+                guest_mount,
+                self.session["andromeda_data"],
+            )
+
+            andromedafs.configure_andromedafs_guest(self.args)
+
+            link_path = os.path.join(self.session["host_user"], "Android")
+            if not os.path.lexists(link_path):
+                os.symlink(guest_mount, link_path)
+        except Exception as e:
+            logging.warning(f"Failed to configure andromedafs mounts: {e}")
 
     @dbus.service.method("io.furios.Andromeda.ContainerManager", out_signature='')
     def UnmountSharedFolder(self):
-        host_dir = self.args.session['host_user'] + '/Android'
-        if helpers.mount.ismount(host_dir):
-            helpers.mount.umount_all(self.args, host_dir)
-            os.rmdir(host_dir)
+        cfg = tools.config.load(self.args)
+
+        cfg["andromeda"]["andromedafs_enabled"] = "False"
+        tools.config.save(self.args, cfg)
+
+        unlocked = False
+        try:
+            val = helpers.lxc.getprop("furios.android.userunlocked")
+            unlocked = (val or "").strip().lower() == "true"
+        except Exception as e:
+            logging.warning(f"Failed to read furios.android.userunlocked: {e}")
+            unlocked = False
+
+        if not unlocked:
+            return
+
+        if not self.session:
+            return
+
+        guest_mount = os.path.join(tools.config.defaults["work"], "andromedafs-guest")
+        host_mount = os.path.join(tools.config.defaults["work"], "andromedafs-host")
+
+        try:
+            andromedafs.umount_andromedafs(
+                self.args,
+                host_mount,
+                self.session["andromeda_data"],
+            )
+            andromedafs.umount_andromedafs(
+                self.args,
+                guest_mount,
+                self.session["andromeda_data"],
+            )
+
+            link_path = os.path.join(self.session["host_user"], "Android")
+            if os.path.islink(link_path) and os.readlink(link_path) == guest_mount:
+                os.unlink(link_path)
+        except Exception as e:
+            logging.warning(f"Failed to unconfigure andromedafs mounts: {e}")
 
     @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='')
     def NfcToggle(self):

@@ -149,6 +149,14 @@ def start(args, session, unlocked_cb=None):
         cm = ipc.DBusContainerService()
         cm.ForceFinishSetup()
 
+        if cfg["andromeda"]["andromedafs_enabled"] == "True":
+            # if started too early it might conflict with android's own services
+            # that setup emulated storage. 5 seconds seems pretty reasonable
+            def delayed_mount():
+                cm.MountSharedFolder()
+                return False
+            GLib.timeout_add_seconds(5, delayed_mount)
+
         timezone = get_timezone()
         if timezone:
             cm.Setprop("persist.sys.timezone", timezone)
