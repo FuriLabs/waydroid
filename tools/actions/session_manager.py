@@ -36,17 +36,17 @@ class DBusSessionManager(dbus.service.Object):
         return True
 
     @dbus.service.method("io.furios.Andromeda.SessionManager", in_signature='', out_signature='s')
-    def VendorType(self):
+    def GetVendorType(self):
         cfg = tools.config.load(self.args)
         return cfg["andromeda"]["vendor_type"]
 
     @dbus.service.method("io.furios.Andromeda.SessionManager", in_signature='', out_signature='s')
-    def IpAddress(self):
+    def GetIpAddress(self):
         ip_address = tools.helpers.net.get_device_ip_address()
         return ip_address if ip_address else "UNKNOWN"
 
     @dbus.service.method("io.furios.Andromeda.SessionManager", in_signature='', out_signature='s')
-    def LineageVersion(self):
+    def GetLineageVersion(self):
         full_version = tools.helpers.props.get(self.args, "ro.lineage.display.version")
         version_parts = full_version.split('-')
         version = '-'.join(version_parts[:2])
