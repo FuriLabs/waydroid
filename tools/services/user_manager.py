@@ -36,7 +36,6 @@ def transition_desktop_files(apps_dir, andromeda_data):
             content = content.replace("X-WayDroid-App", "X-Andromeda-App")
             content = content.replace("Categories=X-Waydroid-App", "Categories=X-Andromeda-App")
 
-
             content = content.replace("/home/furios/.local/share/waydroid/data/icons/",
                                       "/home/furios/.local/share/andromeda/data/icons/")
             content = content.replace("Icon=/var/lib/waydroid/data/icons/",
@@ -72,6 +71,26 @@ def transition_desktop_files(apps_dir, andromeda_data):
                 logging.info("Updated phosh favorites")
     except Exception:
         pass
+
+def cleanup_stale_desktop_files(apps_dir, installed_packages):
+    try:
+        if not os.path.exists(apps_dir):
+            return
+
+        for filename in os.listdir(apps_dir):
+            if not (filename.startswith("android.") and filename.endswith(".desktop")):
+                continue
+
+            package_name = filename[len("android."): -len(".desktop")]
+            if package_name not in installed_packages:
+                path = os.path.join(apps_dir, filename)
+                try:
+                    os.remove(path)
+                    logging.debug(f"Removed stale desktop file: {filename}")
+                except Exception as e:
+                    logging.debug(f"Failed to remove stale desktop file {filename}: {e}")
+    except Exception as e:
+        logging.error(f"Failed during stale desktop cleanup: {e}")
 
 def makeDesktopFile(appInfo, andromeda_data, apps_dir):
     if appInfo is None:
@@ -133,16 +152,32 @@ def start(args, session, unlocked_cb=None):
         if cfg["andromeda"]["auto_adb"] == "True":
             tools.helpers.net.adb_connect(args)
 
+        platformService = IPlatform.get_service(args)
+
+        if not os.path.exists(apps_dir):
+            os.mkdir(apps_dir, 0o700)
+
         transition_desktop_files(apps_dir, andromeda_data)
 
-        platformService = IPlatform.get_service(args)
         if platformService:
-            if not os.path.exists(apps_dir):
-                os.mkdir(apps_dir, 0o700)
-            appsList = platformService.getAppsInfo()
+            appsList = platformService.getAppsInfo() or []
+
+            installed_packages = set()
+            for app in appsList:
+                try:
+                    pkg = app.get("packageName")
+                    if pkg:
+                        installed_packages.add(pkg)
+                except Exception:
+                    continue
+
+            cleanup_stale_desktop_files(apps_dir, installed_packages)
+
             for app in appsList:
                 makeDesktopFile(app, andromeda_data, apps_dir)
+
             multiwin = platformService.getprop("persist.andromeda.multi_windows", "false")
+
         if unlocked_cb:
             unlocked_cb()
 
