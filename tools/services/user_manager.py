@@ -8,6 +8,7 @@ import dbus
 import threading
 import tools.config
 import tools.helpers.net
+from tools import services
 from tools.helpers import ipc, drivers
 from tools.interfaces import IUserMonitor
 from tools.interfaces import IPlatform
@@ -191,6 +192,8 @@ def start(args, session, unlocked_cb=None):
                 cm.MountSharedFolder()
                 return False
             GLib.timeout_add_seconds(5, delayed_mount)
+
+        services.contacts_linux_manager.start(args, session)
 
         timezone = get_timezone()
         if timezone:

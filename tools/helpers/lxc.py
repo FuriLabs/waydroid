@@ -707,3 +707,69 @@ def watch_prop(propname):
         return result.stdout.strip()
     except Exception as e:
         logging.error(f"Failed to watch the prop {propname}: {e}")
+
+def content_insert(args, content_args):
+    state = status(args)
+    if state == "FROZEN":
+        unfreeze(args)
+    elif state != "RUNNING":
+        raise RuntimeError("Andromeda container is {}".format(state))
+
+    command = ["lxc-attach", "-P", tools.config.defaults["lxc"],
+               "-n", "andromeda", "--clear-env"]
+    command.extend(android_env_attach_options())
+    command.extend(["--", "content", "insert"])
+    command.extend(content_args)
+
+    try:
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or "").strip())
+        return result.stdout.strip()
+    finally:
+        if state == "FROZEN":
+            freeze(args)
+
+def content_query(args, content_args):
+    state = status(args)
+    if state == "FROZEN":
+        unfreeze(args)
+    elif state != "RUNNING":
+        raise RuntimeError("Andromeda container is {}".format(state))
+
+    command = ["lxc-attach", "-P", tools.config.defaults["lxc"],
+               "-n", "andromeda", "--clear-env"]
+    command.extend(android_env_attach_options())
+    command.extend(["--", "content", "query"])
+    command.extend(content_args)
+
+    try:
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or "").strip())
+        return result.stdout.strip()
+    finally:
+        if state == "FROZEN":
+            freeze(args)
+
+def content_delete(args, content_args):
+    state = status(args)
+    if state == "FROZEN":
+        unfreeze(args)
+    elif state != "RUNNING":
+        raise RuntimeError("Andromeda container is {}".format(state))
+
+    command = ["lxc-attach", "-P", tools.config.defaults["lxc"],
+               "-n", "andromeda", "--clear-env"]
+    command.extend(android_env_attach_options())
+    command.extend(["--", "content", "delete"])
+    command.extend(content_args)
+
+    try:
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or "").strip())
+        return result.stdout.strip()
+    finally:
+        if state == "FROZEN":
+            freeze(args)

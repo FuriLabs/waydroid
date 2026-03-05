@@ -244,6 +244,7 @@ def start(args, unlocked_cb=None, background=True):
     services.gnss_manager.start(args)
     services.notification_client.start(args)
     services.screen_manager.start(args)
+
     service(args, mainloop)
 
 def do_stop(args, looper):
@@ -251,6 +252,8 @@ def do_stop(args, looper):
     services.clipboard_manager.stop(args)
     services.gnss_manager.stop(args)
     services.screen_manager.stop(args)
+    services.contacts_linux_manager.stop()
+
     looper.quit()
 
 def stop(args):

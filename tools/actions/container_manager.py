@@ -16,6 +16,7 @@ import tools.config
 from tools import helpers
 from tools import services
 from tools.helpers import andromedafs
+from tools.services.contacts_android_manager import ContactsAndroidManager
 import dbus
 import dbus.service
 import dbus.exceptions
@@ -26,6 +27,7 @@ class DBusContainerManager(dbus.service.Object):
         self.args = args
         self.looper = looper
         self.session = None
+        self.contacts_android = None
         dbus.service.Object.__init__(self, bus, object_path)
 
     @dbus.service.method(dbus_interface='org.freedesktop.DBus.Properties', in_signature='s', out_signature='a{sv}')
@@ -34,12 +36,93 @@ class DBusContainerManager(dbus.service.Object):
             return {}
 
         session = self.GetSession()
-        # Convert each string value to variant
         return dict((k, dbus.String(v, variant_level=1)) for k, v in session.items())
 
     @dbus.service.signal(dbus_interface="io.furios.Andromeda.ContainerManager", signature='s')
     def SessionStateChanged(self, state):
         pass
+
+    @dbus.service.signal(dbus_interface="io.furios.Andromeda.ContainerManager", signature='a{sv}s')
+    def AndroidContactChanged(self, contact, change_type):
+        pass
+
+    @dbus.service.signal(dbus_interface="io.furios.Andromeda.ContainerManager", signature='b')
+    def ContactsSyncEnabledChanged(self, enabled):
+        pass
+
+    @dbus.service.signal(dbus_interface="io.furios.Andromeda.ContainerManager", signature='sibs')
+    def LinuxContactImported(self, linux_uid, raw_contact_id, success, error):
+        pass
+
+    @dbus.service.signal(dbus_interface="io.furios.Andromeda.ContainerManager", signature='ibs')
+    def AndroidContactUpdated(self, raw_contact_id, success, error):
+        pass
+
+    @dbus.service.signal(dbus_interface="io.furios.Andromeda.ContainerManager", signature='ibs')
+    def AndroidContactRemoved(self, raw_contact_id, success, error):
+        pass
+
+    def emit_android_contact_changed(self, payload: dict, change_type: str) -> None:
+        try:
+            def to_variant(v):
+                if isinstance(v, bool):
+                    return dbus.Boolean(v, variant_level=1)
+                if isinstance(v, int):
+                    return dbus.Int64(v, variant_level=1)
+                if isinstance(v, float):
+                    return dbus.Double(v, variant_level=1)
+                if isinstance(v, str):
+                    return dbus.String(v, variant_level=1)
+                if v is None:
+                    return dbus.String("", variant_level=1)
+                if isinstance(v, (list, tuple)):
+                    if all(isinstance(x, str) for x in v):
+                        return dbus.Array([dbus.String(x) for x in v], signature='s', variant_level=1)
+                    return dbus.Array([dbus.String(str(x)) for x in v], signature='s', variant_level=1)
+                return dbus.String(str(v), variant_level=1)
+
+            d = {}
+            for k, v in (payload or {}).items():
+                key = dbus.String(str(k))
+                val = to_variant(v)
+                d[key] = val
+
+            contact = dbus.Dictionary(d, signature='sv')
+
+            self.AndroidContactChanged(contact, dbus.String(change_type))
+        except Exception as e:
+            logging.warning(f"Failed to emit AndroidContactChanged: {e}")
+
+    def emit_linux_contact_imported(self, linux_uid, raw_contact_id, success, error):
+        try:
+            self.LinuxContactImported(
+                dbus.String(str(linux_uid or "")),
+                dbus.Int32(int(raw_contact_id)),
+                dbus.Boolean(bool(success)),
+                dbus.String(str(error or "")),
+            )
+        except Exception as e:
+            logging.warning(f"Failed to emit LinuxContactImported: {e}")
+
+    def emit_android_contact_updated(self, raw_contact_id, success, error):
+        try:
+            self.AndroidContactUpdated(
+                dbus.Int32(int(raw_contact_id)),
+                dbus.Boolean(bool(success)),
+                dbus.String(str(error or "")),
+            )
+        except Exception as e:
+            logging.warning(f"Failed to emit AndroidContactUpdated: {e}")
+
+    def emit_android_contact_removed(self, raw_contact_id, success, error):
+        try:
+            self.AndroidContactRemoved(
+                dbus.Int32(int(raw_contact_id)),
+                dbus.Boolean(bool(success)),
+                dbus.String(str(error or "")),
+            )
+        except Exception as e:
+            logging.warning(f"Failed to emit AndroidContactRemoved: {e}")
 
     @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='a{ss}', out_signature='', sender_keyword="sender", connection_keyword="conn")
     def Start(self, session, sender, conn):
@@ -54,6 +137,25 @@ class DBusContainerManager(dbus.service.Object):
         self.session = session
         do_start(self.args, session)
         self.SessionStateChanged("started")
+
+        self.contacts_android = ContactsAndroidManager(
+            args=self.args,
+            session=self.session,
+            get_session=self.GetSession,
+            emit_cb=self.emit_android_contact_changed,
+            emit_linux_contact_imported_cb=self.emit_linux_contact_imported,
+            emit_android_contact_updated_cb=self.emit_android_contact_updated,
+            emit_android_contact_removed_cb=self.emit_android_contact_removed,
+        )
+
+        try:
+            cfg = tools.config.load(self.args)
+            enabled = str(cfg["andromeda"].get("contact_sync_enabled", "False")).lower() == "true"
+            if enabled:
+                self.contacts_android.ensure_andromeda_account()
+                self.contacts_android.start_watcher()
+        except Exception as e:
+            logging.warning(f"Failed to start contacts watcher on session start: {e}")
 
     @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='b', out_signature='')
     def Stop(self, quit_session):
@@ -71,6 +173,12 @@ class DBusContainerManager(dbus.service.Object):
                 )
             except Exception as e:
                 logging.warning(f"Failed to unconfigure andromedafs mounts: {e}")
+
+        if self.contacts_android:
+            try:
+                self.contacts_android.shutdown()
+            except Exception:
+                pass
 
         stop(self.args, quit_session)
         self.SessionStateChanged("stopped")
@@ -273,6 +381,106 @@ class DBusContainerManager(dbus.service.Object):
             tools.helpers.run.user(self.args, action_command, check=False)
             tools.helpers.run.user(self.args, systemd_command, check=False)
 
+    @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='b', out_signature='')
+    def SetContactsSyncEnabled(self, enabled):
+        cfg = tools.config.load(self.args)
+        cfg["andromeda"]["contact_sync_enabled"] = "True" if bool(enabled) else "False"
+        tools.config.save(self.args, cfg)
+
+        if self.contacts_android:
+            if bool(enabled):
+                self.contacts_android.ensure_andromeda_account()
+                self.contacts_android.start_watcher()
+            else:
+                self.contacts_android.stop_watcher()
+
+        self.ContactsSyncEnabledChanged(bool(enabled))
+
+    @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='b')
+    def GetContactsSyncEnabled(self):
+        cfg = tools.config.load(self.args)
+        return str(cfg["andromeda"].get("contact_sync_enabled", "False")).lower() == "true"
+
+    @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='')
+    def TriggerContactsSync(self):
+        if not self.contacts_android:
+            return
+        self.contacts_android.trigger_sync_scan(force_emit=True)
+
+    @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='', out_signature='aa{sv}')
+    def ListAndroidContacts(self):
+        if not self.contacts_android:
+            return
+        contacts = self.contacts_android.list_android_contacts(include_andromeda_owned=True)
+
+        def to_variant(v):
+            if isinstance(v, bool):
+                return dbus.Boolean(v, variant_level=1)
+            if isinstance(v, int):
+                return dbus.Int64(v, variant_level=1)
+            if isinstance(v, float):
+                return dbus.Double(v, variant_level=1)
+            if isinstance(v, str):
+                return dbus.String(v, variant_level=1)
+            if v is None:
+                return dbus.String("", variant_level=1)
+            if isinstance(v, (list, tuple)):
+                if all(isinstance(x, str) for x in v):
+                    return dbus.Array([dbus.String(x) for x in v], signature='s', variant_level=1)
+                return dbus.Array([dbus.String(str(x)) for x in v], signature='s', variant_level=1)
+            return dbus.String(str(v), variant_level=1)
+
+        out = []
+        for c in contacts:
+            d = {}
+            for k, v in (c or {}).items():
+                d[dbus.String(str(k))] = to_variant(v)
+            out.append(dbus.Dictionary(d, signature='sv'))
+
+        return dbus.Array(out, signature='a{sv}')
+
+    @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='a{sv}', out_signature='')
+    def ImportLinuxContact(self, contact):
+        linux_uid = str(contact.get("linux_uid", "") or "").strip()
+        display_name = str(contact.get("display_name", "") or "").strip()
+
+        phones_val = contact.get("phones", []) or []
+        phones = []
+        try:
+            for p in phones_val:
+                s = str(p).strip()
+                if s:
+                    phones.append(s)
+        except Exception:
+            phones = []
+
+        self.contacts_android.enqueue_import_linux_contact(linux_uid, display_name, phones)
+
+    @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='a{sv}', out_signature='')
+    def UpdateAndroidContact(self, contact):
+        if not self.contacts_android:
+            return
+        raw_id = int(contact.get("raw_contact_id", 0) or 0)
+        display_name = str(contact.get("display_name", "") or "").strip()
+
+        phones_val = contact.get("phones", []) or []
+        phones = []
+        try:
+            for p in phones_val:
+                s = str(p).strip()
+                if s:
+                    phones.append(s)
+        except Exception:
+            phones = []
+
+        self.contacts_android.enqueue_update_android_contact(raw_id, display_name, phones)
+
+    @dbus.service.method("io.furios.Andromeda.ContainerManager", in_signature='i', out_signature='')
+    def RemoveAndroidContact(self, raw_contact_id):
+        if not self.contacts_android:
+            return
+        self.contacts_android.enqueue_remove_android_contact(int(raw_contact_id))
+
 def service(args, looper):
     dbus_obj = DBusContainerManager(looper, dbus.SystemBus(), '/ContainerManager', args)
     looper.run()
@@ -410,7 +618,7 @@ def stop(args, quit_session=True):
         # Backwards compatibility
         try:
             helpers.mount.umount_all(args, tools.config.defaults["data"])
-        except:
+        except Exception:
             pass
 
         if which("systemctl") and (tools.helpers.run.user(args, ["systemctl", "is-enabled", "-q", "nfcd"], check=False) == 0):
@@ -423,7 +631,7 @@ def stop(args, quit_session=True):
                     pid = int(args.session["pid"])
                     logging.info(f"Killing PID {pid} of session manager")
                     os.kill(pid, signal.SIGKILL)
-                except:
+                except Exception:
                     pass
             del args.session
 
@@ -432,7 +640,7 @@ def stop(args, quit_session=True):
             for pid in pids:
                 logging.info(f"Killing PID {pid} of session manager")
                 os.kill(int(pid), signal.SIGKILL)
-    except:
+    except Exception:
         pass
 
 def restart(args):

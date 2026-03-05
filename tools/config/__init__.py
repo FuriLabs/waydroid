@@ -24,7 +24,10 @@ config_keys = ["arch",
                "suspend_action",
                "mount_overlays",
                "auto_adb",
-               "andromedafs_enabled"]
+               "andromedafs_enabled",
+               "contact_sync_enabled",
+               "contact_sync_book_name",
+               "contact_sync_export_book_name"]
 
 # Config file/commandline default values
 # $WORK gets replaced with the actual value for args.work (which may be
@@ -42,6 +45,9 @@ defaults = {
     "andromedafs_enabled": "False",
     "container_xdg_runtime_dir": "/run/xdg",
     "container_wayland_display": "wayland-0",
+    "contact_sync_enabled": "False",
+    "contact_sync_book_name": "Andromeda Contacts",
+    "contact_sync_export_book_name": "Personal",
 }
 defaults["images_path"] = defaults["work"] + "/images"
 defaults["rootfs"] = defaults["work"] + "/rootfs"
