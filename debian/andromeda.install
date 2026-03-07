@@ -47,6 +47,8 @@ usr/lib/andromeda/tools/interfaces/IPlatform.py
 usr/lib/andromeda/tools/interfaces/IUserMonitor.py
 usr/lib/andromeda/tools/services/__init__.py
 usr/lib/andromeda/tools/services/clipboard_manager.py
+usr/lib/andromeda/tools/services/contacts_android_manager.py
+usr/lib/andromeda/tools/services/contacts_linux_manager.py
 usr/lib/andromeda/tools/services/gnss_manager.py
 usr/lib/andromeda/tools/services/user_manager.py
 usr/lib/andromeda/tools/services/notification_client.py
