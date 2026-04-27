@@ -158,6 +158,17 @@ class DBusContainerManager(dbus.service.Object):
             andromedafs.configure_andromedafs_guest(self.args)
 
             link_path = os.path.join(self.session["host_user"], "Android")
+            backup_path = os.path.join(self.session["host_user"], "Android.backup")
+
+            if os.path.lexists(link_path):
+                if os.path.isdir(link_path) and not os.path.islink(link_path):
+                    if not os.listdir(link_path):
+                        os.rmdir(link_path)
+                    else:
+                        os.rename(link_path, backup_path)
+                elif not os.path.islink(link_path):
+                    os.rename(link_path, backup_path)
+
             if not os.path.lexists(link_path):
                 os.symlink(guest_mount, link_path)
         except Exception as e:
