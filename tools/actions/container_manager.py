@@ -400,6 +400,14 @@ def do_start(args, session):
 
     helpers.lxc.start(args)
 
+    uiderrors_path = os.path.join(str(session["andromeda_data"]), "system", "uiderrors.txt")
+
+    if os.path.exists(uiderrors_path):
+        try:
+            os.remove(uiderrors_path)
+        except Exception as e:
+            logging.error(f"Failed to remove {uiderrors_path}: {e}")
+
     args.session = session
 
 def stop(args, quit_session=True):
