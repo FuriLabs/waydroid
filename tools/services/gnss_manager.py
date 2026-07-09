@@ -57,8 +57,16 @@ class LocationTracker(multiprocessing.Process):
         helpers.props.set(self.args, "furios.gnss.longitude", str(longitude))
         helpers.props.set(self.args, "furios.gnss.altitude", str(altitude))
 
-        if speed != -1:
+        if speed is not None and speed != -1:
             helpers.props.set(self.args, "furios.gnss.speed", str(speed))
+        if heading is not None and heading != -1:
+            helpers.props.set(self.args, "furios.gnss.bearing", str(heading))
+        if accuracy is not None and accuracy != -1:
+            helpers.props.set(self.args, "furios.gnss.horizontal_accuracy", str(accuracy))
+        if timestamp:
+            seconds, microseconds = timestamp
+            timestamp_ms = seconds * 1000 + microseconds // 1000
+            helpers.props.set(self.args, "furios.gnss.timestamp", str(timestamp_ms))
 
     def run(self):
         try:
